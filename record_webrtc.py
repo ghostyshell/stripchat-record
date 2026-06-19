@@ -101,25 +101,65 @@ class SegmentWriter:
         self.base_path = base_path
         self.paths: list[Path] = []
         self._seen: set[int] = set()
-        self._part_sizes: dict[int, int] = {}
+        self._next_chunk: dict[int, int] = {}
+        self._pending: dict[int, dict[int, bytes]] = {}
+        self._finalized: set[int] = set()
+        self._lock = asyncio.Lock()
 
     def path_for(self, part: int) -> Path:
         return part_path(self.base_path, part)
 
-    def write_chunk(self, part: int, chunk_index: int, b64: str) -> None:
-        path = self.path_for(part)
+    async def write_chunk(self, part: int, chunk_index: int, b64: str) -> int:
+        if part in self._finalized:
+            return 0
         data = base64.b64decode(b64)
-        mode = "wb" if chunk_index == 0 else "ab"
-        with path.open(mode) as handle:
-            handle.write(data)
-        if part not in self._seen:
-            self._seen.add(part)
-            self.paths.append(path)
-        self._part_sizes[part] = self._part_sizes.get(part, 0) + len(data)
+        async with self._lock:
+            if part in self._finalized:
+                return 0
+            pending = self._pending.setdefault(part, {})
+            pending[chunk_index] = data
+            return self._flush_part(part)
 
-    def note_part(self, part: int, size: int, reason: str) -> None:
+    def _flush_part(self, part: int) -> int:
+        written = 0
         path = self.path_for(part)
-        print(f"\n  Saved part {part}: {path} ({format_bytes(size)}, {reason})")
+        expected = self._next_chunk.get(part, 0)
+        pending = self._pending.get(part, {})
+        while expected in pending:
+            data = pending.pop(expected)
+            # Never truncate an existing part file; late chunk 0 must append.
+            mode = "ab" if path.exists() and path.stat().st_size > 0 else "wb"
+            with path.open(mode) as handle:
+                handle.write(data)
+                handle.flush()
+            if part not in self._seen:
+                self._seen.add(part)
+                self.paths.append(path)
+            written += len(data)
+            expected += 1
+        self._next_chunk[part] = expected
+        return written
+
+    async def finalize_part(self, part: int, reason: str) -> int:
+        async with self._lock:
+            self._finalized.add(part)
+            pending = self._pending.get(part, {})
+            if pending:
+                missing = sorted(pending)
+                print(
+                    f"\n  Warning: dropped {len(missing)} out-of-order chunk(s) "
+                    f"for part {part} at finalize",
+                    flush=True,
+                )
+                pending.clear()
+        path = self.path_for(part)
+        disk_size = path.stat().st_size if path.exists() else 0
+        if disk_size > 0:
+            print(
+                f"\n  Saved part {part}: {path} ({format_bytes(disk_size)}, {reason})",
+                flush=True,
+            )
+        return disk_size
 
     def total_bytes(self) -> int:
         return sum(path.stat().st_size for path in self.paths if path.exists())
@@ -166,7 +206,14 @@ def save_recording_result(
 ) -> list[Path]:
     if result.get("cancelled"):
         if segment_writer and segment_writer.paths:
-            paths = segment_writer.paths
+            paths = [
+                path
+                for path in segment_writer.paths
+                if path.exists() and path.stat().st_size > 0
+            ]
+            if not paths:
+                print("Stopped before any recording was saved.")
+                return []
             total_size = segment_writer.total_bytes()
             print(
                 f"Saved {len(paths)} partial part(s) ({format_bytes(total_size)}) "
@@ -187,8 +234,12 @@ def save_recording_result(
     quality_note = f"{quality}, fallback={fallback}" if fallback else quality
 
     if split_size_bytes:
-        paths = segment_writer.paths if segment_writer else []
-        total_size = sum(path.stat().st_size for path in paths if path.exists())
+        paths = [
+            path
+            for path in (segment_writer.paths if segment_writer else [])
+            if path.exists() and path.stat().st_size > 0
+        ]
+        total_size = sum(path.stat().st_size for path in paths)
         print(
             f"Recorded {len(paths)} part(s) at {resolution} "
             f"({quality_note}, {format_bytes(total_size)} total) "
@@ -268,13 +319,13 @@ async def record_direct_webrtc(
 
         async def on_segment_chunk(
             part: int, chunk_index: int, b64: str, _is_first: bool, _is_last: bool
-        ) -> None:
+        ) -> int:
             assert segment_writer is not None
-            segment_writer.write_chunk(part, chunk_index, b64)
+            return await segment_writer.write_chunk(part, chunk_index, b64)
 
-        async def on_segment_complete(part: int, size: int, reason: str) -> None:
+        async def on_segment_complete(part: int, _size: int, reason: str) -> int:
             assert segment_writer is not None
-            segment_writer.note_part(part, size, reason)
+            return await segment_writer.finalize_part(part, reason)
 
         async def on_stream_dimensions(width: int, height: int) -> None:
             vp = viewport_for_stream(width, height)
@@ -424,6 +475,9 @@ async def record_direct_webrtc(
 
 
 async def maybe_reencode(input_path: Path) -> Path | None:
+    if not input_path.exists() or input_path.stat().st_size < 4096:
+        print(f"ffmpeg remux skipped: {input_path.name} is too small or missing")
+        return None
     mp4_path = input_path.with_suffix(".mp4")
     proc = await asyncio.create_subprocess_exec(
         "ffmpeg",
@@ -478,7 +532,11 @@ async def main() -> int:
         default=None,
         help="Full output file path (overrides --output-dir)",
     )
-    parser.add_argument("--headless", action="store_true")
+    parser.add_argument(
+        "--headed",
+        action="store_true",
+        help="Show the Chromium window (default: headless)",
+    )
     parser.add_argument("--no-remux", action="store_true")
     args = parser.parse_args()
 
@@ -504,7 +562,7 @@ async def main() -> int:
         saved_paths = await record_direct_webrtc(
             info=info,
             duration_sec=args.duration,
-            headless=args.headless,
+            headless=not args.headed,
             output_path=output_path,
             split_size_bytes=args.split_size,
         )

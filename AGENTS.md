@@ -47,7 +47,7 @@ Windows: `run.bat MODEL_USERNAME --duration 60 --output-dir D:\recordings`
 | `--duration` | _(none)_ | Seconds to record; omit to record until stream ends |
 | `--output-dir` | `./output` | Directory for output files |
 | `--output` | _(auto)_ | Full output path; overrides `--output-dir` |
-| `--headless` | off | Run Chromium headless (may fail on some systems) |
+| `--headed` | off | Show the Chromium window (default: headless) |
 | `--no-remux` | off | Keep `.webm` only; skip ffmpeg `.mp4` remux |
 
 ## Graphify

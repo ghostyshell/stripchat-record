@@ -48,8 +48,8 @@ The first run creates a virtual environment, installs Python packages, and downl
 # Full output path (overrides --output-dir)
 ./run.sh MODEL_USERNAME --output /path/to/recording.webm
 
-# Headless mode (no browser window)
-./run.sh MODEL_USERNAME --headless
+# Show the browser window (default is headless)
+./run.sh MODEL_USERNAME --headed
 
 # Keep .webm only (skip ffmpeg remux)
 ./run.sh MODEL_USERNAME --no-remux
@@ -150,7 +150,7 @@ If `python` is not recognized, the launcher falls back to `py -3`.
 | `command python not found` | Use `python3`, `py -3`, or activate the venv (`source .venv/bin/activate`) |
 | `No module named 'httpx'` | Run via `./run.sh` / `run.bat`, or `pip install -r requirements.txt` inside `.venv` |
 | `Model is not live` | The model must be streaming; check their page in a browser |
-| `Timed out waiting for stream` | Model offline, geo-blocked, or network issue — retry with browser open (omit `--headless`) |
+| `Timed out waiting for stream` | Model offline, geo-blocked, or network issue — retry with `--headed` to open a visible browser |
 | `ffmpeg remux skipped` | Install ffmpeg and ensure it is on `PATH` |
 | Low resolution output | Fixed in current version — waits for max quality before recording |
 
