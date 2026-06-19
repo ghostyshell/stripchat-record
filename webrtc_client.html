@@ -16,6 +16,12 @@
 
       window.requestStopRecording = function () {
         window.__stopRequested = true;
+        const recorder = window.__activeSegmentRecorder;
+        if (recorder && recorder.state !== "inactive") {
+          try {
+            recorder.stop();
+          } catch (_) {}
+        }
       };
 
       function stopRequested() {
@@ -421,24 +427,54 @@
           return { base64: btoa(binary), size: bytes.length };
         };
 
-        const uploadSegment = async (chunks, part, reason) => {
-          const blob = new Blob(chunks, { type: mimeType });
-          if (!blob.size) return 0;
+        const bytesToBase64 = (bytes) => {
+          let binary = "";
+          for (let i = 0; i < bytes.length; i += 0x8000) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+          }
+          return btoa(binary);
+        };
+
+        const uploadChunk = async (blob, part, chunkIndex) => {
+          if (!blob?.size) return 0;
           const buffer = await blob.arrayBuffer();
           const bytes = new Uint8Array(buffer);
-          const chunkSize = 4 * 1024 * 1024;
-          for (let offset = 0, chunkIndex = 0; offset < bytes.length; offset += chunkSize, chunkIndex += 1) {
-            const slice = bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length));
-            let binary = "";
-            for (let i = 0; i < slice.length; i += 0x8000) {
-              binary += String.fromCharCode.apply(null, slice.subarray(i, i + 0x8000));
-            }
-            const isFirst = chunkIndex === 0;
-            const isLast = offset + slice.length >= bytes.length;
-            await window.__onSegmentChunk(part, chunkIndex, btoa(binary), isFirst, isLast);
-          }
-          await window.__onSegmentComplete(part, bytes.length, reason);
+          const isFirst = chunkIndex === 0;
+          await window.__onSegmentChunk(
+            part,
+            chunkIndex,
+            bytesToBase64(bytes),
+            isFirst,
+            false,
+          );
           return bytes.length;
+        };
+
+        let partChunkIndex = 0;
+        let partUploadedBytes = 0;
+        let uploadChain = Promise.resolve();
+
+        const enqueueChunkUpload = (blob) => {
+          if (splitLimit <= 0 || !blob?.size) return;
+          const chunkIndex = partChunkIndex;
+          partChunkIndex += 1;
+          uploadChain = uploadChain
+            .then(() => uploadChunk(blob, partIndex, chunkIndex))
+            .then((size) => {
+              partUploadedBytes += size;
+            });
+        };
+
+        const finalizePart = async (part, reason) => {
+          await uploadChain;
+          const size = partUploadedBytes;
+          partChunkIndex = 0;
+          partUploadedBytes = 0;
+          uploadChain = Promise.resolve();
+          if (size > 0) {
+            await window.__onSegmentComplete(part, size, reason);
+          }
+          return size;
         };
 
         const createRecorder = (stream) => {
@@ -449,13 +485,25 @@
           });
           const chunks = [];
           recorder.ondataavailable = (ev) => {
-            if (ev.data?.size) chunks.push(ev.data);
+            if (ev.data?.size) {
+              chunks.push(ev.data);
+              enqueueChunkUpload(ev.data);
+            }
           };
           const bytes = () => chunks.reduce((total, chunk) => total + (chunk.size || 0), 0);
           const stopped = () => new Promise((resolve) => {
-            recorder.onstop = resolve;
+            if (recorder.state === "inactive") {
+              resolve();
+              return;
+            }
+            recorder.onstop = () => resolve();
           });
-          return { recorder, chunks, bytes, stopped };
+          const stop = () => {
+            if (recorder.state !== "inactive") {
+              recorder.stop();
+            }
+          };
+          return { recorder, chunks, bytes, stopped, stop };
         };
 
         const emitRecordingStats = (segmentBytes) => {
@@ -478,6 +526,7 @@
         };
 
         let segment = createRecorder(stream);
+        window.__activeSegmentRecorder = segment.recorder;
         segment.recorder.start(1000);
         emitRecordingStats(segment.bytes());
         const statsTimer = setInterval(() => emitRecordingStats(segment.bytes()), 1000);
@@ -485,13 +534,14 @@
         while (!recordingDone()) {
           await Promise.race([sleep(250), streamEndPromise]);
           if (splitLimit > 0 && segment.bytes() >= splitLimit) {
-            segment.recorder.stop();
+            segment.stop();
             await segment.stopped();
-            const size = await uploadSegment(segment.chunks, partIndex, "size_limit");
+            const size = await finalizePart(partIndex, "size_limit");
             totalBytes += size;
             partIndex += 1;
             if (recordingDone()) break;
             segment = createRecorder(stream);
+            window.__activeSegmentRecorder = segment.recorder;
             segment.recorder.start(1000);
             if (typeof window.__onProgress === "function") {
               window.__onProgress(`Started part ${partIndex}`);
@@ -500,8 +550,10 @@
         }
 
         clearInterval(statsTimer);
-        segment.recorder.stop();
+        window.__activeSegmentRecorder = null;
+        segment.stop();
         await segment.stopped();
+        await uploadChain;
         emitRecordingStats(segment.bytes());
 
         const endReason = stopRequested()
@@ -513,11 +565,7 @@
         state.phase = "done";
 
         if (splitLimit > 0) {
-          const finalSize = await uploadSegment(
-            segment.chunks,
-            partIndex,
-            endReason,
-          );
+          const finalSize = await finalizePart(partIndex, endReason);
           totalBytes += finalSize;
           return {
             split: true,

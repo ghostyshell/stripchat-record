@@ -101,6 +101,7 @@ class SegmentWriter:
         self.base_path = base_path
         self.paths: list[Path] = []
         self._seen: set[int] = set()
+        self._part_sizes: dict[int, int] = {}
 
     def path_for(self, part: int) -> Path:
         return part_path(self.base_path, part)
@@ -114,10 +115,14 @@ class SegmentWriter:
         if part not in self._seen:
             self._seen.add(part)
             self.paths.append(path)
+        self._part_sizes[part] = self._part_sizes.get(part, 0) + len(data)
 
     def note_part(self, part: int, size: int, reason: str) -> None:
         path = self.path_for(part)
         print(f"\n  Saved part {part}: {path} ({format_bytes(size)}, {reason})")
+
+    def total_bytes(self) -> int:
+        return sum(path.stat().st_size for path in self.paths if path.exists())
 
 
 async def fetch_stream_info(model: str) -> dict:
@@ -162,7 +167,7 @@ def save_recording_result(
     if result.get("cancelled"):
         if segment_writer and segment_writer.paths:
             paths = segment_writer.paths
-            total_size = sum(path.stat().st_size for path in paths if path.exists())
+            total_size = segment_writer.total_bytes()
             print(
                 f"Saved {len(paths)} partial part(s) ({format_bytes(total_size)}) "
                 f"in {elapsed:.1f}s, stopped: interrupted"
@@ -224,6 +229,8 @@ async def record_direct_webrtc(
             )
         browser = await p.chromium.launch(
             headless=headless,
+            handle_sigint=False,
+            handle_sigterm=False,
             args=launch_args,
         )
         context = await browser.new_context(
@@ -315,6 +322,9 @@ async def record_direct_webrtc(
         )
 
         stop_attempts = {"count": 0}
+        result: dict | None = None
+        loop = asyncio.get_running_loop()
+        save_grace_sec = 45
 
         async def request_browser_stop() -> None:
             try:
@@ -322,32 +332,81 @@ async def record_direct_webrtc(
             except Exception:
                 pass
 
-        loop = asyncio.get_running_loop()
-
         def sigint_handler() -> None:
             stop_attempts["count"] += 1
             if stop_attempts["count"] == 1:
-                print("\n  Ctrl+C — stopping recording and saving file ...", flush=True)
+                print(
+                    "\n  Ctrl+C — stopping recording and saving file ...",
+                    flush=True,
+                )
                 loop.create_task(request_browser_stop())
+                try:
+                    loop.remove_signal_handler(signal.SIGINT)
+                except Exception:
+                    pass
             else:
                 print("\n  Force quit.", flush=True)
                 record_task.cancel()
 
         loop.add_signal_handler(signal.SIGINT, sigint_handler)
-        result: dict | None = None
         try:
-            result = await record_task
+            result = await asyncio.shield(record_task)
         except asyncio.CancelledError:
-            raise KeyboardInterrupt from None
+            if segment_writer and segment_writer.paths:
+                result = {
+                    "endReason": "interrupted",
+                    "split": True,
+                    "cancelled": False,
+                }
+            else:
+                raise KeyboardInterrupt from None
         except Exception as exc:
+            msg = str(exc).lower()
             if segment_writer and segment_writer.paths:
                 result = {"endReason": "interrupted", "split": True, "cancelled": False}
-            elif "stopped by user" in str(exc).lower():
+            elif "stopped by user" in msg:
                 print(f"\n  {exc}")
                 result = {"cancelled": True, "endReason": "interrupted"}
+            elif "closed" in msg and segment_writer and segment_writer.paths:
+                result = {"endReason": "interrupted", "split": True, "cancelled": False}
             else:
                 raise
         finally:
+            if (
+                stop_attempts["count"] > 0
+                and not record_task.done()
+                and segment_writer
+                and segment_writer.paths
+            ):
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.shield(record_task), timeout=save_grace_sec
+                    )
+                except Exception:
+                    result = {
+                        "endReason": "interrupted",
+                        "split": True,
+                        "cancelled": False,
+                    }
+            elif result is None and not record_task.done():
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.shield(record_task), timeout=600
+                    )
+                except Exception:
+                    if segment_writer and segment_writer.paths:
+                        result = {
+                            "endReason": "interrupted",
+                            "split": True,
+                            "cancelled": False,
+                        }
+            if result is None and record_task.done() and not record_task.cancelled():
+                try:
+                    result = record_task.result()
+                except Exception:
+                    pass
+            if result is None and segment_writer and segment_writer.paths:
+                result = {"endReason": "interrupted", "split": True, "cancelled": False}
             try:
                 loop.remove_signal_handler(signal.SIGINT)
             except Exception:
