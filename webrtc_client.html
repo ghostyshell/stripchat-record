@@ -452,29 +452,50 @@
 
         let partChunkIndex = 0;
         let partUploadedBytes = 0;
+        let partOpen = true;
         let uploadChain = Promise.resolve();
 
         const enqueueChunkUpload = (blob) => {
-          if (splitLimit <= 0 || !blob?.size) return;
+          if (splitLimit <= 0 || !blob?.size || !partOpen) return;
           const chunkIndex = partChunkIndex;
           partChunkIndex += 1;
           uploadChain = uploadChain
             .then(() => uploadChunk(blob, partIndex, chunkIndex))
             .then((size) => {
               partUploadedBytes += size;
+            })
+            .catch((err) => {
+              reportProgress(`Chunk upload failed: ${err?.message || err}`);
             });
         };
 
         const finalizePart = async (part, reason) => {
           await uploadChain;
-          const size = partUploadedBytes;
+          partOpen = false;
+          const reportedSize = partUploadedBytes;
           partChunkIndex = 0;
           partUploadedBytes = 0;
           uploadChain = Promise.resolve();
-          if (size > 0) {
-            await window.__onSegmentComplete(part, size, reason);
+          if (reportedSize <= 0) {
+            return 0;
           }
-          return size;
+          const diskSize = await window.__onSegmentComplete(
+            part,
+            reportedSize,
+            reason,
+          );
+          return diskSize || reportedSize;
+        };
+
+        const flushSegment = async (segment) => {
+          if (segment.recorder.state === "recording") {
+            try {
+              segment.recorder.requestData();
+            } catch (_) {}
+          }
+          segment.stop();
+          await segment.stopped();
+          await uploadChain;
         };
 
         const createRecorder = (stream) => {
@@ -534,12 +555,12 @@
         while (!recordingDone()) {
           await Promise.race([sleep(250), streamEndPromise]);
           if (splitLimit > 0 && segment.bytes() >= splitLimit) {
-            segment.stop();
-            await segment.stopped();
+            await flushSegment(segment);
             const size = await finalizePart(partIndex, "size_limit");
             totalBytes += size;
             partIndex += 1;
             if (recordingDone()) break;
+            partOpen = true;
             segment = createRecorder(stream);
             window.__activeSegmentRecorder = segment.recorder;
             segment.recorder.start(1000);
@@ -551,9 +572,7 @@
 
         clearInterval(statsTimer);
         window.__activeSegmentRecorder = null;
-        segment.stop();
-        await segment.stopped();
-        await uploadChain;
+        await flushSegment(segment);
         emitRecordingStats(segment.bytes());
 
         const endReason = stopRequested()
