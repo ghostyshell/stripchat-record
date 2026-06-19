@@ -23,8 +23,15 @@
       }
 
       function reportProgress(message) {
+        if (window.__recorderState?.phase === "recording") return;
         if (typeof window.__onProgress === "function") {
           window.__onProgress(message);
+        }
+      }
+
+      function reportRecordingStats(durationSec, sizeBytes, targetDurationSec) {
+        if (typeof window.__onRecordingStats === "function") {
+          window.__onRecordingStats(durationSec, sizeBytes, targetDurationSec);
         }
       }
 
@@ -351,13 +358,29 @@
           audioBitsPerSecond: 192_000,
         });
         const chunks = [];
+        const chunkBytes = () => chunks.reduce((total, chunk) => total + (chunk.size || 0), 0);
+        const targetDurationSec = durationMs != null && durationMs > 0 ? durationMs / 1000 : null;
+        const recordStartedAt = Date.now();
+        const emitRecordingStats = () => {
+          reportRecordingStats(
+            (Date.now() - recordStartedAt) / 1000,
+            chunkBytes(),
+            targetDurationSec,
+          );
+        };
+
         recorder.ondataavailable = (ev) => {
-          if (ev.data?.size) chunks.push(ev.data);
+          if (ev.data?.size) {
+            chunks.push(ev.data);
+            emitRecordingStats();
+          }
         };
         const stopped = new Promise((resolve) => {
           recorder.onstop = resolve;
         });
         recorder.start(1000);
+        emitRecordingStats();
+        const statsTimer = setInterval(emitRecordingStats, 1000);
 
         if (durationMs != null && durationMs > 0) {
           await new Promise((r) => setTimeout(r, durationMs));
@@ -365,8 +388,10 @@
           await streamEndPromise;
         }
 
+        clearInterval(statsTimer);
         recorder.stop();
         await stopped;
+        emitRecordingStats();
 
         const blob = new Blob(chunks, { type: mimeType });
         if (!blob.size) throw new Error("Recorder produced empty output");

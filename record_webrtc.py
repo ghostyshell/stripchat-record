@@ -22,6 +22,22 @@ CLIENT_HTML = Path(__file__).resolve().parent / "webrtc_client.html"
 WEBRTC_WS = "wss://edge-webrtc.doppiocdn.com/"
 
 
+def format_bytes(num: int) -> str:
+    if num >= 1_000_000:
+        return f"{num / 1_000_000:.1f} MB"
+    if num >= 1_000:
+        return f"{num / 1_000:.1f} KB"
+    return f"{num} B"
+
+
+def format_duration(seconds: float) -> str:
+    whole = int(seconds)
+    mins, secs = divmod(whole, 60)
+    if mins:
+        return f"{mins}m {secs:02d}s"
+    return f"{secs}s"
+
+
 async def fetch_stream_info(model: str) -> dict:
     url = f"https://stripchat.com/api/front/v1/broadcasts/{quote(model)}"
     headers = {
@@ -75,7 +91,24 @@ async def record_direct_webrtc(
             ),
         )
         page = await context.new_page()
-        await page.expose_function("__onProgress", lambda message: print(f"  [{message}]"))
+
+        def on_progress(message: str) -> None:
+            print(f"  [{message}]")
+
+        def on_recording_stats(
+            duration_sec: float, size_bytes: int, target_duration_sec: float | None
+        ) -> None:
+            duration = format_duration(duration_sec)
+            size = format_bytes(size_bytes)
+            if target_duration_sec:
+                target = format_duration(target_duration_sec)
+                line = f"  Recording: {duration} / {target}, {size}"
+            else:
+                line = f"  Recording: {duration}, {size}"
+            print(f"\r{line}", end="", flush=True)
+
+        await page.expose_function("__onProgress", on_progress)
+        await page.expose_function("__onRecordingStats", on_recording_stats)
         await page.set_content(html, wait_until="domcontentloaded")
 
         if duration_sec is None:
@@ -106,6 +139,7 @@ async def record_direct_webrtc(
         await context.close()
         await browser.close()
 
+    print()
     raw = base64.b64decode(result["base64"])
     output_path.write_bytes(raw)
     end_reason = result.get("endReason", "unknown")
