@@ -4,14 +4,25 @@
     <meta charset="utf-8" />
     <title>Stream recorder</title>
     <style>
-      html, body { margin: 0; background: #000; }
-      video { width: 100vw; height: 100vh; object-fit: contain; }
+      html, body { margin: 0; width: 100%; height: 100%; background: #000; overflow: hidden; }
+      video { display: block; width: 100%; height: 100%; object-fit: fill; }
     </style>
   </head>
   <body>
     <video id="preview" autoplay playsinline muted></video>
     <script>
       window.__recorderState = { phase: "init", error: null };
+      window.__stopRequested = false;
+
+      window.requestStopRecording = function () {
+        window.__stopRequested = true;
+      };
+
+      function stopRequested() {
+        return !!window.__stopRequested;
+      }
+
+      const USER_STOPPED = "Recording stopped by user";
 
       function uuid() {
         if (crypto.randomUUID) return crypto.randomUUID();
@@ -29,9 +40,21 @@
         }
       }
 
-      function reportRecordingStats(durationSec, sizeBytes, targetDurationSec) {
+      function reportRecordingStats(
+        durationSec,
+        partBytes,
+        totalBytes,
+        partIndex,
+        targetDurationSec,
+      ) {
         if (typeof window.__onRecordingStats === "function") {
-          window.__onRecordingStats(durationSec, sizeBytes, targetDurationSec);
+          window.__onRecordingStats(
+            durationSec,
+            partBytes,
+            totalBytes,
+            partIndex,
+            targetDurationSec,
+          );
         }
       }
 
@@ -88,7 +111,8 @@
         return names.slice(startIdx + 1, maxIdx + 1);
       }
 
-      async function connectAndRecord({ streamName, appKey, wsUrl, durationMs }) {
+      async function connectAndRecord({ streamName, appKey, wsUrl, durationMs, splitSizeBytes }) {
+        window.__stopRequested = false;
         const mediaSessionId = uuid();
         const state = window.__recorderState;
         state.phase = "connecting";
@@ -255,6 +279,9 @@
         const waitForStream = () => new Promise((resolve, reject) => {
           const deadline = Date.now() + 45000;
           const tick = () => {
+            if (stopRequested()) {
+              return reject(new Error(USER_STOPPED));
+            }
             const stream = window.__remoteStream;
             const track = stream?.getVideoTracks?.()?.[0];
             if (stream && track && track.readyState === "live") {
@@ -272,6 +299,9 @@
           if (isPlaying) return resolve();
           const deadline = Date.now() + 30000;
           const tick = () => {
+            if (stopRequested()) {
+              return reject(new Error(USER_STOPPED));
+            }
             if (isPlaying) return resolve();
             if (Date.now() > deadline) {
               return reject(new Error(`Timed out waiting for PLAYING (phase=${state.phase})`));
@@ -281,12 +311,20 @@
           tick();
         });
 
-        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        const sleep = (ms) => new Promise((resolve) => {
+          const started = Date.now();
+          const tick = () => {
+            if (stopRequested() || Date.now() - started >= ms) return resolve();
+            setTimeout(tick, Math.min(100, ms));
+          };
+          tick();
+        });
 
         const stepQualityLadder = async () => {
           if (!qualityLadder.length) return;
           state.phase = "upgrading_quality";
           for (const quality of qualityLadder) {
+            if (stopRequested()) return;
             requestQuality(quality);
             await sleep(1200);
           }
@@ -304,8 +342,19 @@
             const w = video.videoWidth;
             const h = video.videoHeight;
             const now = Date.now();
+            if (stopRequested()) {
+              if (w > 0 && h > 0) {
+                reportProgress(`Stopped during upgrade; using current ${w}x${h}`);
+                return resolve({ width: w, height: h, fallback: true });
+              }
+              return reject(new Error(USER_STOPPED));
+            }
             if (now - lastReport > 2000) {
-              reportProgress(`Video size ${w}x${h}, waiting for >= ${minW}x${minH}`);
+              if (w >= minW && h >= minH) {
+                reportProgress(`Video at ${w}x${h} (ready)`);
+              } else {
+                reportProgress(`Video size ${w}x${h}, waiting for >= ${minW}x${minH}`);
+              }
               lastReport = now;
             }
             if (w >= minW && h >= minH) {
@@ -333,6 +382,9 @@
         await stepQualityLadder();
         requestQuality(maxProfile.name);
         const dimensions = await waitForMaxResolution();
+        if (typeof window.__onStreamDimensions === "function") {
+          await window.__onStreamDimensions(dimensions.width, dimensions.height);
+        }
         state.phase = "recording";
         reportProgress(`Recording at ${dimensions.width}x${dimensions.height} (${maxProfile.name})`);
 
@@ -352,72 +404,154 @@
         ];
         const mimeType = preferred.find((m) => MediaRecorder.isTypeSupported(m)) || "video/webm";
         const videoBitrate = Math.max((maxProfile?.bitrate || 2_500_000) * 1.25, 2_500_000);
-        const recorder = new MediaRecorder(stream, {
-          mimeType,
-          videoBitsPerSecond: videoBitrate,
-          audioBitsPerSecond: 192_000,
-        });
-        const chunks = [];
-        const chunkBytes = () => chunks.reduce((total, chunk) => total + (chunk.size || 0), 0);
         const targetDurationSec = durationMs != null && durationMs > 0 ? durationMs / 1000 : null;
         const recordStartedAt = Date.now();
-        const emitRecordingStats = () => {
+        const splitLimit = splitSizeBytes > 0 ? splitSizeBytes : 0;
+        let partIndex = 1;
+        let totalBytes = 0;
+
+        const blobToBase64 = async (blob) => {
+          const buffer = await blob.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          let binary = "";
+          const step = 0x8000;
+          for (let i = 0; i < bytes.length; i += step) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+          }
+          return { base64: btoa(binary), size: bytes.length };
+        };
+
+        const uploadSegment = async (chunks, part, reason) => {
+          const blob = new Blob(chunks, { type: mimeType });
+          if (!blob.size) return 0;
+          const buffer = await blob.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          const chunkSize = 4 * 1024 * 1024;
+          for (let offset = 0, chunkIndex = 0; offset < bytes.length; offset += chunkSize, chunkIndex += 1) {
+            const slice = bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length));
+            let binary = "";
+            for (let i = 0; i < slice.length; i += 0x8000) {
+              binary += String.fromCharCode.apply(null, slice.subarray(i, i + 0x8000));
+            }
+            const isFirst = chunkIndex === 0;
+            const isLast = offset + slice.length >= bytes.length;
+            await window.__onSegmentChunk(part, chunkIndex, btoa(binary), isFirst, isLast);
+          }
+          await window.__onSegmentComplete(part, bytes.length, reason);
+          return bytes.length;
+        };
+
+        const createRecorder = (stream) => {
+          const recorder = new MediaRecorder(stream, {
+            mimeType,
+            videoBitsPerSecond: videoBitrate,
+            audioBitsPerSecond: 192_000,
+          });
+          const chunks = [];
+          recorder.ondataavailable = (ev) => {
+            if (ev.data?.size) chunks.push(ev.data);
+          };
+          const bytes = () => chunks.reduce((total, chunk) => total + (chunk.size || 0), 0);
+          const stopped = () => new Promise((resolve) => {
+            recorder.onstop = resolve;
+          });
+          return { recorder, chunks, bytes, stopped };
+        };
+
+        const emitRecordingStats = (segmentBytes) => {
           reportRecordingStats(
             (Date.now() - recordStartedAt) / 1000,
-            chunkBytes(),
+            segmentBytes,
+            totalBytes + segmentBytes,
+            partIndex,
             targetDurationSec,
           );
         };
 
-        recorder.ondataavailable = (ev) => {
-          if (ev.data?.size) {
-            chunks.push(ev.data);
-            emitRecordingStats();
+        const recordingDone = () => {
+          if (stopRequested()) return true;
+          if (state.endReason) return true;
+          if (durationMs != null && durationMs > 0) {
+            return Date.now() - recordStartedAt >= durationMs;
           }
+          return false;
         };
-        const stopped = new Promise((resolve) => {
-          recorder.onstop = resolve;
-        });
-        recorder.start(1000);
-        emitRecordingStats();
-        const statsTimer = setInterval(emitRecordingStats, 1000);
 
-        if (durationMs != null && durationMs > 0) {
-          await new Promise((r) => setTimeout(r, durationMs));
-        } else {
-          await streamEndPromise;
+        let segment = createRecorder(stream);
+        segment.recorder.start(1000);
+        emitRecordingStats(segment.bytes());
+        const statsTimer = setInterval(() => emitRecordingStats(segment.bytes()), 1000);
+
+        while (!recordingDone()) {
+          await Promise.race([sleep(250), streamEndPromise]);
+          if (splitLimit > 0 && segment.bytes() >= splitLimit) {
+            segment.recorder.stop();
+            await segment.stopped();
+            const size = await uploadSegment(segment.chunks, partIndex, "size_limit");
+            totalBytes += size;
+            partIndex += 1;
+            if (recordingDone()) break;
+            segment = createRecorder(stream);
+            segment.recorder.start(1000);
+            if (typeof window.__onProgress === "function") {
+              window.__onProgress(`Started part ${partIndex}`);
+            }
+          }
         }
 
         clearInterval(statsTimer);
-        recorder.stop();
-        await stopped;
-        emitRecordingStats();
+        segment.recorder.stop();
+        await segment.stopped();
+        emitRecordingStats(segment.bytes());
 
-        const blob = new Blob(chunks, { type: mimeType });
-        if (!blob.size) throw new Error("Recorder produced empty output");
-
-        const buffer = await blob.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-        let binary = "";
-        const step = 0x8000;
-        for (let i = 0; i < bytes.length; i += step) {
-          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
-        }
+        const endReason = stopRequested()
+          ? "interrupted"
+          : (state.endReason || (durationMs ? "duration_reached" : "unknown"));
 
         try { ws.close(); } catch (_) {}
         try { pc.close(); } catch (_) {}
-
         state.phase = "done";
+
+        if (splitLimit > 0) {
+          const finalSize = await uploadSegment(
+            segment.chunks,
+            partIndex,
+            endReason,
+          );
+          totalBytes += finalSize;
+          return {
+            split: true,
+            parts: partIndex,
+            mimeType,
+            totalSize: totalBytes,
+            quality: maxProfile?.name || "source",
+            width: dimensions.width,
+            height: dimensions.height,
+            videoBitrate,
+            qualityFallback: !!dimensions.fallback,
+            endReason,
+            cancelled: stopRequested() && totalBytes === 0,
+          };
+        }
+
+        const blob = new Blob(segment.chunks, { type: mimeType });
+        if (!blob.size) {
+          if (stopRequested()) {
+            return { cancelled: true, endReason: "interrupted" };
+          }
+          throw new Error("Recorder produced empty output");
+        }
+        const encoded = await blobToBase64(blob);
         return {
           mimeType,
-          size: blob.size,
+          size: encoded.size,
           quality: maxProfile?.name || "source",
           width: dimensions.width,
           height: dimensions.height,
           videoBitrate,
           qualityFallback: !!dimensions.fallback,
-          endReason: state.endReason || (durationMs ? "duration_reached" : "unknown"),
-          base64: btoa(binary),
+          endReason,
+          base64: encoded.base64,
         };
       }
 
