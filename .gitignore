@@ -1,0 +1,26 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Recordings (never commit captured streams)
+output/
+*.webm
+*.mp4
+*.mov
+
+# Playwright / browser caches
+.playwright/
+
+# Graphify generated graph (regenerate with `graphify .`)
+graphify-out/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+.env
+.idea/
+.vscode/

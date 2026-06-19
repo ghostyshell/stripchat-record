@@ -1,0 +1,402 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Stream recorder</title>
+    <style>
+      html, body { margin: 0; background: #000; }
+      video { width: 100vw; height: 100vh; object-fit: contain; }
+    </style>
+  </head>
+  <body>
+    <video id="preview" autoplay playsinline muted></video>
+    <script>
+      window.__recorderState = { phase: "init", error: null };
+
+      function uuid() {
+        if (crypto.randomUUID) return crypto.randomUUID();
+        return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+          const r = (Math.random() * 16) | 0;
+          const v = c === "x" ? r : (r & 0x3) | 0x8;
+          return v.toString(16);
+        });
+      }
+
+      function reportProgress(message) {
+        if (typeof window.__onProgress === "function") {
+          window.__onProgress(message);
+        }
+      }
+
+      const TERMINAL_STREAM_STATUSES = new Set([
+        "FINISHED",
+        "STOPPED",
+        "ERRORED",
+        "ENDED",
+        "DISCONNECTED",
+        "CLOSED",
+      ]);
+
+      function profilePixels(profile) {
+        return (profile?.width || 0) * (profile?.height || 0);
+      }
+
+      function pickMaxProfile(profiles) {
+        if (!profiles || typeof profiles !== "object") {
+          return { name: "source", width: 1280, height: 720, bitrate: 2_500_000, fps: 30 };
+        }
+        if (profiles.source) {
+          return { name: "source", ...profiles.source };
+        }
+        let best = null;
+        for (const [name, profile] of Object.entries(profiles)) {
+          if (!profile || name.includes("blurred")) continue;
+          const pixels = profilePixels(profile);
+          if (!best || pixels > profilePixels(best)) {
+            best = { name, ...profile };
+          }
+        }
+        return best || { name: "source", width: 1280, height: 720, bitrate: 2_500_000, fps: 30 };
+      }
+
+      function pickStartProfile(profiles) {
+        if (!profiles || typeof profiles !== "object") return "240p";
+        const names = Object.keys(profiles).filter((n) => !n.includes("blurred"));
+        if (names.includes("240p")) return "240p";
+        return names.sort(
+          (a, b) => profilePixels(profiles[a]) - profilePixels(profiles[b]),
+        )[0] || "source";
+      }
+
+      function buildQualityLadder(profiles, startName, maxName) {
+        if (!profiles) return [maxName];
+        const names = Object.keys(profiles)
+          .filter((n) => !n.includes("blurred"))
+          .sort((a, b) => profilePixels(profiles[a]) - profilePixels(profiles[b]));
+        const startIdx = names.indexOf(startName);
+        const maxIdx = names.indexOf(maxName);
+        if (startIdx < 0 || maxIdx < 0 || startIdx >= maxIdx) {
+          return maxName === startName ? [] : [maxName];
+        }
+        return names.slice(startIdx + 1, maxIdx + 1);
+      }
+
+      async function connectAndRecord({ streamName, appKey, wsUrl, durationMs }) {
+        const mediaSessionId = uuid();
+        const state = window.__recorderState;
+        state.phase = "connecting";
+        state.endReason = null;
+
+        const ws = new WebSocket(wsUrl);
+        const pc = new RTCPeerConnection();
+        let remoteStream = null;
+        let gotInfo = false;
+        let profiles = null;
+        let maxProfile = null;
+        let startProfile = "240p";
+        let qualityLadder = [];
+        let ladderIndex = 0;
+        let isPlaying = false;
+        let streamEndResolve = null;
+        const streamEndPromise = new Promise((resolve) => {
+          streamEndResolve = resolve;
+        });
+
+        const signalStreamEnd = (reason) => {
+          if (state.endReason) return;
+          state.endReason = reason;
+          state.phase = "stream_ended";
+          streamEndResolve(reason);
+        };
+
+        const requestQuality = (quality) => {
+          reportProgress(`Requesting quality ${quality} ...`);
+          ws.send(JSON.stringify({
+            message: "changeQuality",
+            data: { mediaSessionId, quality },
+          }));
+        };
+
+        const waitOpen = new Promise((resolve, reject) => {
+          ws.addEventListener("open", resolve, { once: true });
+          ws.addEventListener("error", () => reject(new Error("WebSocket failed")), { once: true });
+        });
+
+        ws.addEventListener("message", async (event) => {
+          let msg;
+          try {
+            msg = JSON.parse(event.data);
+          } catch (_) {
+            return;
+          }
+
+          if (msg.message === "connected") {
+            const peerConfig = msg.data?.peerConfig || {};
+            pc.setConfiguration({
+              bundlePolicy: peerConfig.bundlePolicy || "balanced",
+              iceServers: peerConfig.iceServers || [],
+              iceTransportPolicy: peerConfig.iceTransportPolicy || "all",
+            });
+            state.phase = "connected";
+            ws.send(JSON.stringify({
+              message: "getStreamInfo",
+              data: { mediaSessionId, modelName: streamName },
+            }));
+            return;
+          }
+
+          if (msg.message === "getStreamInfoReply" && !gotInfo) {
+            gotInfo = true;
+            profiles = msg.data?.profiles || {};
+            maxProfile = pickMaxProfile(profiles);
+            startProfile = pickStartProfile(profiles);
+            qualityLadder = buildQualityLadder(profiles, startProfile, maxProfile.name);
+            state.maxProfile = maxProfile;
+            state.startProfile = startProfile;
+            state.qualityLadder = qualityLadder;
+            state.phase = "negotiating";
+            reportProgress(
+              `Profiles: start=${startProfile}, max=${maxProfile.name} ` +
+              `(${maxProfile.width}x${maxProfile.height}), ladder=${qualityLadder.join(" -> ") || "none"}`,
+            );
+
+            pc.addTransceiver("audio", { direction: "recvonly" });
+            pc.addTransceiver("video", { direction: "recvonly" });
+            pc.ontrack = (ev) => {
+              remoteStream = ev.streams[0] || new MediaStream([ev.track]);
+              document.getElementById("preview").srcObject = remoteStream;
+              window.__remoteStream = remoteStream;
+            };
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+            ws.send(JSON.stringify({
+              message: "playStream",
+              data: [{
+                hasAudio: true,
+                hasVideo: true,
+                mediaProvider: "WebRTC",
+                mediaSessionId,
+                name: streamName,
+                published: false,
+                quality: startProfile,
+                record: false,
+                sdp: offer.sdp,
+              }],
+            }));
+            return;
+          }
+
+          if (msg.message === "setRemoteSDP") {
+            const sdp = msg.data?.[1];
+            if (sdp) {
+              await pc.setRemoteDescription({ type: "answer", sdp });
+            }
+            return;
+          }
+
+          if (msg.message === "notifyStreamStatusEvent") {
+            const status = msg.data?.[0]?.status;
+            if (status === "PLAYING") {
+              isPlaying = true;
+              state.phase = "playing";
+              reportProgress("Stream playing");
+            } else if (state.phase === "recording" && TERMINAL_STREAM_STATUSES.has(status)) {
+              signalStreamEnd(`status_${status}`);
+            }
+          }
+
+          if (msg.message === "changeQualityStatus") {
+            const data = msg.data || {};
+            if (data.status === "success") {
+              reportProgress(`Quality now ${data.currentQuality}`);
+            } else if (data.status === "waiting" && data.nextQuality) {
+              reportProgress(`Quality changing ${data.currentQuality} -> ${data.nextQuality}`);
+            }
+          }
+        });
+
+        ws.addEventListener("close", () => {
+          if (state.phase === "recording" || state.phase === "playing" || state.phase === "upgrading_quality") {
+            signalStreamEnd("websocket_closed");
+          }
+        });
+
+        pc.addEventListener("connectionstatechange", () => {
+          if (
+            (state.phase === "recording" || state.phase === "playing" || state.phase === "upgrading_quality") &&
+            ["failed", "closed", "disconnected"].includes(pc.connectionState)
+          ) {
+            signalStreamEnd(`peer_${pc.connectionState}`);
+          }
+        });
+
+        ws.addEventListener("open", () => {
+          ws.send(JSON.stringify({
+            message: "connection",
+            data: [{
+              appKey,
+              clientBrowserVersion: navigator.userAgent,
+              clientOSVersion: navigator.userAgent,
+              mediaProviders: ["WebRTC"],
+              custom: { name: streamName, aclAuth: "" },
+            }],
+          }));
+        });
+
+        await waitOpen;
+
+        const waitForStream = () => new Promise((resolve, reject) => {
+          const deadline = Date.now() + 45000;
+          const tick = () => {
+            const stream = window.__remoteStream;
+            const track = stream?.getVideoTracks?.()?.[0];
+            if (stream && track && track.readyState === "live") {
+              return resolve(stream);
+            }
+            if (Date.now() > deadline) {
+              return reject(new Error(`Timed out waiting for stream (phase=${state.phase})`));
+            }
+            requestAnimationFrame(tick);
+          };
+          tick();
+        });
+
+        const waitForPlaying = () => new Promise((resolve, reject) => {
+          if (isPlaying) return resolve();
+          const deadline = Date.now() + 30000;
+          const tick = () => {
+            if (isPlaying) return resolve();
+            if (Date.now() > deadline) {
+              return reject(new Error(`Timed out waiting for PLAYING (phase=${state.phase})`));
+            }
+            requestAnimationFrame(tick);
+          };
+          tick();
+        });
+
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+        const stepQualityLadder = async () => {
+          if (!qualityLadder.length) return;
+          state.phase = "upgrading_quality";
+          for (const quality of qualityLadder) {
+            requestQuality(quality);
+            await sleep(1200);
+          }
+        };
+
+        const waitForMaxResolution = () => new Promise((resolve, reject) => {
+          const targetW = maxProfile?.width || 1280;
+          const targetH = maxProfile?.height || 720;
+          const minW = Math.floor(targetW * 0.9);
+          const minH = Math.floor(targetH * 0.9);
+          const deadline = Date.now() + 60000;
+          let lastReport = 0;
+          const tick = () => {
+            const video = document.getElementById("preview");
+            const w = video.videoWidth;
+            const h = video.videoHeight;
+            const now = Date.now();
+            if (now - lastReport > 2000) {
+              reportProgress(`Video size ${w}x${h}, waiting for >= ${minW}x${minH}`);
+              lastReport = now;
+            }
+            if (w >= minW && h >= minH) {
+              return resolve({ width: w, height: h });
+            }
+            if (now > deadline) {
+              if (w >= 640 && h >= 360) {
+                reportProgress(`Using best available ${w}x${h} (target ${targetW}x${targetH} timed out)`);
+                return resolve({ width: w, height: h, fallback: true });
+              }
+              return reject(
+                new Error(
+                  `Timed out waiting for ${targetW}x${targetH}, got ${w}x${h}`,
+                ),
+              );
+            }
+            requestAnimationFrame(tick);
+          };
+          tick();
+        });
+
+        reportProgress("Waiting for live stream track ...");
+        const stream = await waitForStream();
+        await waitForPlaying();
+        await stepQualityLadder();
+        requestQuality(maxProfile.name);
+        const dimensions = await waitForMaxResolution();
+        state.phase = "recording";
+        reportProgress(`Recording at ${dimensions.width}x${dimensions.height} (${maxProfile.name})`);
+
+        const videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack) {
+          videoTrack.addEventListener("ended", () => signalStreamEnd("video_track_ended"));
+        }
+        const audioTrack = stream.getAudioTracks()[0];
+        if (audioTrack) {
+          audioTrack.addEventListener("ended", () => signalStreamEnd("audio_track_ended"));
+        }
+
+        const preferred = [
+          "video/webm;codecs=vp9,opus",
+          "video/webm;codecs=vp8,opus",
+          "video/webm",
+        ];
+        const mimeType = preferred.find((m) => MediaRecorder.isTypeSupported(m)) || "video/webm";
+        const videoBitrate = Math.max((maxProfile?.bitrate || 2_500_000) * 1.25, 2_500_000);
+        const recorder = new MediaRecorder(stream, {
+          mimeType,
+          videoBitsPerSecond: videoBitrate,
+          audioBitsPerSecond: 192_000,
+        });
+        const chunks = [];
+        recorder.ondataavailable = (ev) => {
+          if (ev.data?.size) chunks.push(ev.data);
+        };
+        const stopped = new Promise((resolve) => {
+          recorder.onstop = resolve;
+        });
+        recorder.start(1000);
+
+        if (durationMs != null && durationMs > 0) {
+          await new Promise((r) => setTimeout(r, durationMs));
+        } else {
+          await streamEndPromise;
+        }
+
+        recorder.stop();
+        await stopped;
+
+        const blob = new Blob(chunks, { type: mimeType });
+        if (!blob.size) throw new Error("Recorder produced empty output");
+
+        const buffer = await blob.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = "";
+        const step = 0x8000;
+        for (let i = 0; i < bytes.length; i += step) {
+          binary += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+        }
+
+        try { ws.close(); } catch (_) {}
+        try { pc.close(); } catch (_) {}
+
+        state.phase = "done";
+        return {
+          mimeType,
+          size: blob.size,
+          quality: maxProfile?.name || "source",
+          width: dimensions.width,
+          height: dimensions.height,
+          videoBitrate,
+          qualityFallback: !!dimensions.fallback,
+          endReason: state.endReason || (durationMs ? "duration_reached" : "unknown"),
+          base64: btoa(binary),
+        };
+      }
+
+      window.startStreamRecording = connectAndRecord;
+    </script>
+  </body>
+</html>
