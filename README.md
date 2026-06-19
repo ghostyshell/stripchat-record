@@ -1,5 +1,8 @@
 # stripchat-record
 
+[![Discord](https://img.shields.io/badge/Discord-5865F2?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/ckrEtDFwxP)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/ghosty99)
+
 Record Stripchat live streams at **source resolution** via direct WebRTC — no page UI, chat, or sidebar in the output.
 
 Connects to the Doppio CDN WebRTC edge (`wss://edge-webrtc.doppiocdn.com/`), upgrades to max quality (`source`), and saves a stream-only video file.
