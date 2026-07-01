@@ -1,0 +1,55 @@
+---
+description: Audit and sync README + CHANGELOG + AGENTS before pushing. Invoke /sync-docs before any git push to keep public documentation accurate.
+globs:
+  - README.md
+  - CHANGELOG.md
+  - AGENTS.md
+  - CLAUDE.md
+  - record_webrtc.py
+  - webrtc_client.html
+  - requirements.txt
+  - run.sh
+  - run.bat
+alwaysApply: false
+---
+
+# sync-docs
+
+Before pushing, run `/sync-docs` (or follow this checklist manually) to audit and
+update the docs against the actual current codebase. This repo is a small Python
+project with no `docs/` site; the public surface is `README.md` + `CHANGELOG.md`,
+and the agent surface is `AGENTS.md` (+ `CLAUDE.md` pointer).
+
+## What to check
+
+- **CLI flags table** (README + AGENTS) — every `argparse` flag in
+  `record_webrtc.py` is documented, defaults match, and the **`--split-size`**
+  flag (default `1G`, produces `-partNNN.webm`) is accurate. This is the most
+  frequently stale item.
+- **Output paths** — `{model}-stream-{timestamp}-partNNN.webm` split scheme and
+  the single-file `--split-size 0` form match `record_webrtc.py`.
+- **How it works / data flow** — steps match the code (segment rotation +
+  per-part ffmpeg remux).
+- **Project layout / file table** — file tree in README and the table in
+  `AGENTS.md` match the actual files on disk (incl. `scripts/`, `.githooks/`,
+  `.cursor/rules/`, `CHANGELOG.md`, `CLAUDE.md`).
+- **Stack / versions** — matches `requirements.txt` (`playwright`, `httpx`) and
+  the Python 3.10+ requirement.
+- **Live URLs and badges** — correct and not stale.
+- **CHANGELOG** — a `[Unreleased]` entry exists for any user-visible change since
+  the last release.
+- **No em/en dashes** in public-facing copy (`rg '[—–]' README.md CHANGELOG.md`).
+
+## Procedure
+
+1. Read `README.md` and `CHANGELOG.md` fully.
+2. Read `record_webrtc.py` argparse block + `requirements.txt` for hard facts.
+3. Diff the CLI flags table and "How it works" against the code.
+4. Apply minimum edits to make docs accurate — do not rewrite accurate prose.
+5. Verify the file table in `AGENTS.md` matches `ls` of the repo root.
+6. Run `rg '[—–]' README.md CHANGELOG.md` and fix any hits (or run the
+   `humanizer` skill for substantive copy).
+7. Report: N sections checked, N fixed.
+
+Run this before `git push`. The `.githooks/pre-push` hook reminds you (install
+once with `sh scripts/install-hooks.sh`).
