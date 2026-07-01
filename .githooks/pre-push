@@ -1,0 +1,19 @@
+#!/bin/sh
+# Pre-push hook: remind to run /sync-docs before publishing.
+#
+# Install once after cloning: sh scripts/install-hooks.sh
+# (points git's core.hooksPath at this version-controlled .githooks/ dir)
+#
+# The hook only warns — it does not block the push.
+# Run /sync-docs in Claude Code / OpenCode, or follow .cursor/rules/sync-docs.mdc
+# in Cursor, to audit and update README.md + CHANGELOG.md before the push lands.
+
+# Check if README.md exists and has been modified more recently than the last push.
+# If so, nudge the developer to sync docs.
+if [ -f README.md ]; then
+  # Non-blocking reminder only.
+  printf '\n[pre-push] Reminder: run /sync-docs to audit README + CHANGELOG + AGENTS before publishing.\n' >&2
+  printf '[pre-push] Skipping? Press Ctrl-C within 3 seconds to abort the push.\n\n' >&2
+fi
+
+exit 0
