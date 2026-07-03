@@ -1,4 +1,4 @@
-# stripchat-record — agent guide
+# stripchat-record - agent guide
 
 ## Project overview
 
@@ -76,7 +76,7 @@ graphify update .           # after code changes (AST-only, no API cost)
 graphify query "how does recording work?"
 ```
 
-Agents: see `.cursor/rules/graphify.mdc` — run graphify before exploring the codebase.
+Agents: see `.cursor/rules/graphify.mdc` - run graphify before exploring the codebase.
 
 ## Code conventions
 
