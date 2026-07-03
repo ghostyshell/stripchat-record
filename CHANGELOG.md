@@ -5,7 +5,10 @@ All notable changes to **stripchat-record** are listed here. The format is based
 
 ## [Unreleased]
 
-## [0.4.0] - 2025-06-27
+### Added
+- `AGENTS.md` as the single source of truth for agent instructions, plus `.cursor/rules/graphify.mdc` and the cross-tool docs/instruction sync workflow (`sync-docs`, no-em-dashes rule, pre-push hook).
+
+## [0.4.0] - 2026-06-27
 
 ### Added
 - Discord and Ko-fi support badges in the README.
