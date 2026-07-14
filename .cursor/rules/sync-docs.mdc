@@ -36,8 +36,8 @@ and the agent surface is `AGENTS.md` (+ `CLAUDE.md` pointer).
 - **Stack / versions** — matches `requirements.txt` (`playwright`, `httpx`) and
   the Python 3.10+ requirement.
 - **Live URLs and badges** — correct and not stale.
-- **CHANGELOG** — a `[Unreleased]` entry exists for any user-visible change since
-  the last release.
+- **CHANGELOG** - a release header at the top has a bullet for any user-visible
+  change since the last release (no `[Unreleased]` section; bump version/date).
 - **No em/en dashes** in public-facing copy (`rg '[—–]' README.md CHANGELOG.md`).
 
 ## Procedure

@@ -3,7 +3,7 @@
 All notable changes to **stripchat-record** are listed here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.4.1] - 2026-07-15
 
 ### Added
 - `AGENTS.md` as the single source of truth for agent instructions, plus `.cursor/rules/graphify.mdc` and the cross-tool docs/instruction sync workflow (`sync-docs`, no-em-dashes rule, pre-push hook).
@@ -35,6 +35,6 @@ All notable changes to **stripchat-record** are listed here. The format is based
   - Records the raw `MediaStream` with `MediaRecorder`.
   - Remuxes to `.mp4` with ffmpeg.
 
-[Unreleased]: https://github.com/ghostyshell/stripchat-record/compare/v0.4.0...HEAD
+[0.4.1]: https://github.com/ghostyshell/stripchat-record/releases/tag/v0.4.1
 [0.4.0]: https://github.com/ghostyshell/stripchat-record/releases/tag/v0.4.0
 [0.1.0]: https://github.com/ghostyshell/stripchat-record/releases/tag/v0.1.0
