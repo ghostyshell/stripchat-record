@@ -10,7 +10,7 @@ Quick orientation for Claude Code:
 - **Before exploring code** run `graphify query` (see `.cursor/rules/graphify.mdc`);
   after code changes run `graphify update .`.
 - **After substantive changes** run the `code-reviewer` agent (`security-auditor`
-  for input/secret/network surface) and add a `CHANGELOG.md` `[Unreleased]` entry.
+  for input/secret/network surface) and add a `CHANGELOG.md` entry under the release header (bump version/date).
 - Recordings default to **1 GiB split parts** (`--split-size`); keep that accurate
   in the docs.
 - No em/en dashes in public-facing copy (`rg '[—–]'`).

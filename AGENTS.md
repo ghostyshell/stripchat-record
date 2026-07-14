@@ -100,7 +100,7 @@ This file (`AGENTS.md`) is the **single source of truth** for agent instructions
 
 - Run `graphify update .` to refresh the knowledge graph (AST-only, no API cost). Use `graphify query` before exploring the codebase.
 - Run the **`code-reviewer`** agent after any substantive change; `security-auditor` for input/secret/network surface.
-- Add a `CHANGELOG.md` entry under `[Unreleased]` for user-visible changes.
+- Add a `CHANGELOG.md` entry under the release header (bump version/date) for user-visible changes.
 
 ### Tool-specific notes
 
