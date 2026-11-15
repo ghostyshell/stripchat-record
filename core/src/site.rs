@@ -25,8 +25,13 @@ pub fn is_allowed_media_host(url: &str) -> bool {
     let Some(rest) = url.strip_prefix("https://") else {
         return false;
     };
-    let host = rest.split(['/', '?']).next().unwrap_or("");
-    let host = host.split(':').next().unwrap_or("");
+    let authority = rest.split(['/', '?']).next().unwrap_or("");
+    // `https://media-hls.doppiocdn.com@evil.example/` would otherwise read as
+    // the CDN while ureq connects to evil.example.
+    if authority.contains('@') {
+        return false;
+    }
+    let host = authority.split(':').next().unwrap_or("");
     let ok = |prefix: &str| {
         ["doppiocdn.com", "doppiocdn.org", "doppiocdn.net", "doppiocdn.media"]
             .iter()
@@ -289,6 +294,7 @@ mod tests {
             "https://media-hls.doppiocdn.com/b-hls-20/1/x.mp4"
         ));
         assert!(is_allowed_media_host("https://edge-hls.doppiocdn.org/hls/1"));
+        assert!(!is_allowed_media_host("https://media-hls.doppiocdn.com@evil.example/x"));
         assert!(!is_allowed_media_host("https://evil.doppiocdn.com.attacker.net/x"));
         assert!(!is_allowed_media_host("http://media-hls.doppiocdn.com/x"));
         assert!(!is_allowed_media_host("file:///etc/passwd"));
