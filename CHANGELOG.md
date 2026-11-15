@@ -10,7 +10,7 @@ All notable changes to **stripchat-record** are listed here. The format is based
   Python Playwright recorder. React frontend with Record, Library, Convert and
   Settings pages, a job queue with progress and cancel, and a `?mock=1`
   fixture bridge for UI work without a network.
-- `stripchat-recorder-core` engine: site API + MOUFLON v2 URI decoding + fMP4 recording
+- `stripchat-core` engine: site API + MOUFLON v2 URI decoding + fMP4 recording
 - `stripchat-recorder-cli` headless CLI: `record`, `convert`, `presets`, `library`,
   `doctor`.
 - Recording is append-only and per segment, so a dropped connection or a hard
