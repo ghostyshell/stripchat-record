@@ -9,8 +9,7 @@ Record Stripchat live rooms at source quality, straight from the CDN. No screen
 capture, no browser, no re-encode: the app pulls the site's own HLS playlist,
 downloads every segment as it airs and writes it to disk.
 
-Same family look and feel as Keepsake Atelier, GODsend 360 and GODsend PSP,
-built on the same stack (Rust engine + Tauri 2 + React).
+Built with a Rust engine, Tauri 2 and React.
 
 | Record | Library |
 | --- | --- |

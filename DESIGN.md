@@ -1,9 +1,9 @@
 # Stripchat Recorder design system
 
-The "midnight console" family look (Keepsake Atelier, GODsend 360, GODsend
-PSP, GODsend Switch) with this app's own accent. Near-black ink, one accent
-spectrum, brass as the single warm note, hairline glass surfaces, monospaced
-data, staggered entrances, and a hard reduced-motion kill switch.
+The "midnight console" family look, with this app's own accent. Near-black
+ink, one accent spectrum, brass as the single warm note, hairline glass
+surfaces, monospaced data, staggered entrances, and a hard reduced-motion kill
+switch.
 
 Everything is implemented in `app/src/styles.css`. Tokens live on `:root`;
 raw hex in components is banned.
