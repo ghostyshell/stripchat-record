@@ -62,6 +62,11 @@ fn civil_from_days(z: i64) -> (i64, u32, u32) {
     (if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+/// Truncate a URL for an error message without splitting a UTF-8 character.
+pub fn short_url(url: &str, max: usize) -> String {
+    url.chars().take(max).collect()
+}
+
 /// A filesystem-safe slug for a model name.
 pub fn slug(name: &str) -> String {
     let cleaned: String = name

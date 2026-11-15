@@ -108,8 +108,13 @@ fn main() -> std::process::ExitCode {
 fn install_ctrlc() -> Arc<AtomicBool> {
     let flag = Arc::new(AtomicBool::new(false));
     let handler_flag = flag.clone();
+    // First Ctrl+C asks the job to stop at the next segment; a second one
+    // exits immediately, because ctrlc replaces the default disposition.
     let _ = ctrlc::set_handler(move || {
-        handler_flag.store(true, Ordering::SeqCst);
+        if handler_flag.swap(true, Ordering::SeqCst) {
+            eprintln!("\n  force quit");
+            std::process::exit(130);
+        }
     });
     flag
 }
@@ -186,20 +191,30 @@ fn run(cli: Cli) -> Result<()> {
                 } else {
                     None
                 });
+                let mut saved = 0;
+                let mut failures = Vec::new();
                 for path in &report.paths {
                     ctx.message(format!("finalizing {}", path.display()));
-                    let out = media::finalize(
+                    match media::finalize(
                         ffmpeg.as_deref(),
                         ffprobe.as_deref(),
                         path,
                         convert_id,
                         keep_source || job_config.keep_ts,
                         ctx,
-                    )?;
-                    ctx.message(format!("saved {}", out.display()));
-                    if let Some(note) = &report.note {
-                        eprintln!("\n  note: {note}");
+                    ) {
+                        Ok(out) => {
+                            saved += 1;
+                            ctx.message(format!("saved {}", out.display()));
+                        }
+                        Err(e) => failures.push(format!("{}: {e}", path.display())),
                     }
+                }
+                if let Some(note) = &report.note {
+                    eprintln!("\n  note: the recording ended early: {note}");
+                }
+                if saved == 0 {
+                    return Err(stripchat_core::Error::other(failures.join("; ")));
                 }
                 Ok(())
             });

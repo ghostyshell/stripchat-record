@@ -65,7 +65,11 @@ impl Config {
         if let Some(parent) = config_path().parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(config_path(), serde_json::to_vec_pretty(self)?)
+        // Write then rename: a kill mid-save must not truncate the settings.
+        let tmp = config_path().with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec_pretty(self)?)?;
+        std::fs::rename(&tmp, config_path())?;
+        Ok(())
     }
 
     /// Resolved output directory: the configured one, else the video folder.

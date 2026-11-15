@@ -44,9 +44,12 @@ pub struct Http {
 
 impl Http {
     pub fn new(config: &Config) -> Result<Self> {
+        // No redirects: a 302 from the CDN must not carry the request (and the
+        // body we write to disk) to a host the allow-list never checked.
         let plain = || {
             ureq::AgentBuilder::new()
                 .timeout(std::time::Duration::from_secs(30))
+                .redirects(0)
                 .build()
         };
         let configured = config.proxy.trim();
@@ -63,6 +66,7 @@ impl Http {
                 .map_err(|e| Error::Other(format!("bad proxy {configured:?}: {e}")))?;
             ureq::AgentBuilder::new()
                 .timeout(std::time::Duration::from_secs(30))
+                .redirects(0)
                 .proxy(proxy)
                 .build()
         };
@@ -90,7 +94,7 @@ impl Http {
         if !is_allowed_media_host(url) {
             return Err(Error::Other(format!(
                 "refusing to fetch a non-CDN URL: {}",
-                &url[..url.len().min(80)]
+                crate::util::short_url(url, 80)
             )));
         }
         let resp = self
@@ -107,6 +111,14 @@ impl Http {
     }
 
     fn get_media(&self, url: &str) -> Result<String> {
+        // Playlist URLs come from the CDN master, so they get the same guard as
+        // segments: a master cannot point us at an arbitrary host.
+        if !is_allowed_media_host(url) {
+            return Err(Error::Other(format!(
+                "refusing to fetch a non-CDN playlist: {}",
+                crate::util::short_url(url, 80)
+            )));
+        }
         self.agent
             .get(url)
             .set("User-Agent", USER_AGENT)
