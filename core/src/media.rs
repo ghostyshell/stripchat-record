@@ -156,9 +156,17 @@ pub fn encode(
     cancellable: bool,
     ctx: &JobContext,
 ) -> Result<()> {
+    if same_file(src, dst) {
+        return Err(Error::Other(
+            "the output would overwrite the source file".into(),
+        ));
+    }
     if let Some(parent) = dst.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    // Only remove what this run created: a failed re-encode must not delete a
+    // good file that was already there.
+    let existed = dst.exists();
     let mut child = Command::new(ffmpeg)
         .arg("-y")
         .arg("-i")
@@ -211,17 +219,32 @@ pub fn encode(
     let status = child.wait().map_err(|e| Error::Other(e.to_string()))?;
     let stderr_tail = errors.join().unwrap_or_default();
     if cancelled {
-        let _ = std::fs::remove_file(dst);
+        if !existed {
+            let _ = std::fs::remove_file(dst);
+        }
         return Err(Error::Cancelled(ctx.job_id()));
     }
     if !status.success() {
-        let _ = std::fs::remove_file(dst);
+        if !existed {
+            let _ = std::fs::remove_file(dst);
+        }
         return Err(Error::Other(format!(
             "ffmpeg exited with {status}: {}",
             stderr_tail.trim().lines().last().unwrap_or("no output")
         )));
     }
     Ok(())
+}
+
+/// True when both paths resolve to the same file.
+pub fn same_file(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
 }
 
 /// Strip the `.recording` marker: `x.recording.mp4` -> `x.mp4`.
@@ -248,6 +271,10 @@ pub fn finalize(
     ctx: &JobContext,
 ) -> Result<PathBuf> {
     let out = final_path(recording);
+    if same_file(recording, &out) {
+        // Nothing to do: the file is already final.
+        return Ok(out);
+    }
     let Some(ffmpeg) = ffmpeg else {
         if out != recording {
             std::fs::rename(recording, &out)?;

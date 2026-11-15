@@ -160,16 +160,32 @@ fn spawn_record(
             } else {
                 None
             });
+            let mut saved = 0;
+            let mut failures = Vec::new();
             for path in &report.paths {
-                let out = media::finalize(
+                match media::finalize(
                     ffmpeg.as_deref(),
                     ffprobe.as_deref(),
                     path,
                     preset,
                     keep_source || config.keep_ts,
                     ctx,
-                )?;
-                ctx.message(format!("saved {}", out.display()));
+                ) {
+                    Ok(out) => {
+                        saved += 1;
+                        ctx.message(format!("saved {}", out.display()));
+                    }
+                    Err(e) => failures.push(format!("{}: {e}", path.display())),
+                }
+            }
+            if saved == 0 {
+                return Err(Error::other(failures.join("; ")));
+            }
+            if let Some(note) = &report.note {
+                ctx.message(format!("saved {saved} file(s); recording ended early: {note}"));
+            }
+            if !failures.is_empty() {
+                tracing::warn!("some parts failed to finalize: {}", failures.join("; "));
             }
             Ok(())
         },
@@ -186,13 +202,23 @@ fn record_start(
     convert: Option<String>,
     keep_source: Option<bool>,
 ) -> Result<u64> {
-    let config = state.config();
+    let model = model.trim().to_string();
+    if state
+        .jobs
+        .list()
+        .iter()
+        .any(|job| job.state == stripchat_core::jobs::JobState::Running
+            && job.kind == "record"
+            && job.label == model)
+    {
+        return Err(Error::other(format!("{model} is already recording")));
+    }
     let opts = RecordOptions {
-        model: model.trim().to_string(),
+        model,
         quality: quality.unwrap_or_else(|| "source".into()),
         duration_secs,
         output: None,
-        config,
+        config: state.config(),
     };
     Ok(spawn_record(
         &app,
@@ -257,8 +283,8 @@ fn library_list(state: State<'_, AppState>) -> Result<Vec<Recording>> {
 }
 
 #[tauri::command]
-fn library_delete(path: String) -> Result<()> {
-    library::delete(&PathBuf::from(path))
+fn library_delete(state: State<'_, AppState>, path: String) -> Result<()> {
+    library::delete_within(&state.config().resolved_output_dir(), &PathBuf::from(path))
 }
 
 #[tauri::command]

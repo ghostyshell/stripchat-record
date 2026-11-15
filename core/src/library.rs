@@ -54,9 +54,28 @@ pub fn list(dir: &Path) -> Result<Vec<Recording>> {
     Ok(out)
 }
 
-pub fn delete(path: &Path) -> Result<()> {
-    // Only ever delete inside a recordings folder the user pointed us at.
-    std::fs::remove_file(path)?;
+/// Delete a recording, but only a media file inside `dir`.
+///
+/// The path arrives from the webview, so it is treated as untrusted: it must
+/// resolve inside the recordings folder and be a video file.
+pub fn delete_within(dir: &Path, path: &Path) -> Result<()> {
+    let root = dir.canonicalize().unwrap_or_else(|_| dir.to_path_buf());
+    let target = path.canonicalize()?;
+    if !target.starts_with(&root) {
+        return Err(crate::error::Error::Other(
+            "refusing to delete a file outside the recordings folder".into(),
+        ));
+    }
+    let name = target
+        .file_name()
+        .map(|n| n.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    if !(name.ends_with(".mp4") || name.ends_with(".mkv")) {
+        return Err(crate::error::Error::Other(
+            "refusing to delete a file that is not a recording".into(),
+        ));
+    }
+    std::fs::remove_file(&target)?;
     Ok(())
 }
 

@@ -14,7 +14,7 @@ use crate::error::{Error, Result};
 use crate::hls;
 use crate::jobs::JobContext;
 use crate::mouflon::{self, KeyRing};
-use crate::site::{self, Cam};
+use crate::site;
 use crate::util;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
@@ -77,7 +77,9 @@ pub struct RecordReport {
 /// Append-only part file with size-based rotation.
 struct PartWriter {
     dir: PathBuf,
+    /// Stem as asked for; `unique` disambiguates a collision.
     stem: String,
+    unique: u32,
     split: Option<u64>,
     part: u32,
     file: Option<File>,
@@ -95,6 +97,7 @@ impl PartWriter {
         let mut writer = Self {
             dir,
             stem,
+            unique: 0,
             split,
             part: 0,
             file: None,
@@ -109,26 +112,40 @@ impl PartWriter {
     }
 
     fn path_for(&self, part: u32) -> PathBuf {
+        let stem = if self.unique == 0 {
+            self.stem.clone()
+        } else {
+            format!("{}-{}", self.stem, self.unique)
+        };
         if self.split.is_some() {
             self.dir
-                .join(format!("{}-part{part:03}.recording.mp4", self.stem))
+                .join(format!("{stem}-part{part:03}.recording.mp4"))
         } else {
-            self.dir.join(format!("{}.recording.mp4", self.stem))
+            self.dir.join(format!("{stem}.recording.mp4"))
         }
     }
 
     fn open_part(&mut self) -> Result<()> {
         self.part += 1;
-        let path = self.path_for(self.part);
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
-        self.part_bytes = file.metadata().map(|m| m.len()).unwrap_or(0);
-        self.file = Some(file);
-        self.paths.push(path);
-        self.current_map = None;
-        Ok(())
+        // `create_new` refuses an existing file: two recordings started in the
+        // same second must never append into one another's parts.
+        for _ in 0..64 {
+            let path = self.path_for(self.part);
+            match OpenOptions::new().create_new(true).write(true).open(&path) {
+                Ok(file) => {
+                    self.part_bytes = 0;
+                    self.file = Some(file);
+                    self.paths.push(path);
+                    self.current_map = None;
+                    return Ok(());
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    self.unique += 1;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Err(Error::Other("could not find a free file name".into()))
     }
 
     fn write(&mut self, data: &[u8]) -> Result<()> {
@@ -164,8 +181,17 @@ impl PartWriter {
         Ok(true)
     }
 
+    /// Close the file and drop any part that never received a byte, so a
+    /// rotation at the very end does not leave an empty `.recording.mp4`.
     fn finish(&mut self) {
         self.file = None;
+        self.paths.retain(|path| {
+            let keep = path.metadata().map(|m| m.len() > 0).unwrap_or(false);
+            if !keep {
+                let _ = std::fs::remove_file(path);
+            }
+            keep
+        });
     }
 }
 
@@ -202,8 +228,20 @@ fn init_bytes(http: &site::Http, ctx: &JobContext, writer: &mut PartWriter, map:
     Ok(bytes)
 }
 
-fn is_offline(http: &site::Http, model: &str) -> Option<Cam> {
-    site::fetch_cam(http, model).ok().filter(|c| c.is_public_live())
+/// What the site API says right now. `Unknown` is not `Offline`: an unreachable
+/// API must never end a recording.
+enum Liveness {
+    Live,
+    Offline,
+    Unknown,
+}
+
+fn liveness(http: &site::Http, model: &str) -> Liveness {
+    match site::fetch_cam(http, model) {
+        Ok(cam) if cam.is_public_live() => Liveness::Live,
+        Ok(_) => Liveness::Offline,
+        Err(_) => Liveness::Unknown,
+    }
 }
 
 /// Record until the stream ends, the duration elapses, or the job is cancelled.
@@ -217,7 +255,7 @@ pub fn record(
 
     let http = site::Http::new(config)?;
     let (cam, mut pkey, variants) = site::resolve(&http, &opts.model, ring)?;
-    let variant = site::pick_variant(&variants, &opts.quality)
+    let mut variant = site::pick_variant(&variants, &opts.quality)
         .ok_or_else(|| Error::Other("no playable variant".into()))?
         .clone();
     let quality = variant
@@ -272,7 +310,10 @@ pub fn record(
                 Ok(pair) => pair,
                 Err(e) => {
                     consecutive_failures += 1;
-                    if is_offline(&http, &opts.model).is_none() {
+                    ctx.check_cancel().map_err(|_| Error::Cancelled(ctx.job_id()))?;
+                    // Only a definite "the room is not live" ends the recording.
+                    // An unreachable API (403, timeout, proxy down) must not.
+                    if matches!(liveness(&http, &opts.model), Liveness::Offline) {
                         end_reason = EndReason::StreamEnded;
                         return Ok(());
                     }
@@ -286,18 +327,34 @@ pub fn record(
             consecutive_failures = 0;
 
             if stale {
-                // The pkey rotated out: re-read the master and the ring.
+                // The pkey rotated out: re-read the master, pick a new key, and
+                // re-parse the variants so the variant URL carries the new key.
                 let bare = site::fetch_master(&http, cam.stream_name()?)?;
                 let refreshed = mouflon::pick_pkey(&bare, ring)
                     .ok_or_else(|| Error::Other("pkey rotated and no replacement known".into()))?;
                 if refreshed == pkey {
                     return Err(Error::Other("the CDN rejects the pkey we hold".into()));
                 }
+                let (master, still_stale) =
+                    site::fetch_master_with_pkey(&http, cam.stream_name()?, &refreshed)?;
+                if still_stale {
+                    return Err(Error::Other(
+                        "the CDN served the advert playlist for the new pkey".into(),
+                    ));
+                }
+                let variants = hls::parse_master_playlist(
+                    &site::master_url(cam.stream_name()?),
+                    &master,
+                );
+                let next = site::pick_variant(&variants, &opts.quality)
+                    .ok_or_else(|| Error::Other("no playable variant after the key rotated".into()))?;
+                variant = next.clone();
                 pkey = refreshed;
                 pdkey = ring
                     .get(&pkey)
                     .cloned()
                     .ok_or_else(|| Error::Other(format!("no pdkey for pkey {pkey}")))?;
+                next_seq = None;
                 continue;
             }
 
@@ -308,15 +365,27 @@ pub fn record(
                 continue;
             }
 
-            let start = *next_seq.get_or_insert(media.segments[0].seq);
+            let last = media.segments[media.segments.len() - 1].seq;
+            let start = match next_seq {
+                Some(next) if next > last => {
+                    // The CDN restarted its numbering; resume at this window
+                    // instead of filtering everything out forever.
+                    tracing::info!("media sequence went backwards, resuming");
+                    media.segments[0].seq
+                }
+                Some(next) => next,
+                None => media.segments[0].seq,
+            };
+            next_seq = Some(start);
             for segment in media.segments.iter().filter(|s| s.seq >= start) {
                 ctx.check_cancel().map_err(|_| Error::Cancelled(ctx.job_id()))?;
                 let data = match download(&http, ctx, &segment.uri, config.segment_retries) {
                     Ok(data) => data,
+                    Err(Error::Cancelled(id)) => return Err(Error::Cancelled(id)),
                     Err(e) => {
                         // A vanished segment usually means the stream ended and
-                        // the window slid; stop with the file intact.
-                        if is_offline(&http, &opts.model).is_none() {
+                        // the window slid; an unreachable API does not.
+                        if matches!(liveness(&http, &opts.model), Liveness::Offline) {
                             end_reason = EndReason::StreamEnded;
                             return Ok(());
                         }
