@@ -3,6 +3,13 @@
 All notable changes to **stripchat-record** are listed here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.2] - 2026-11-15
+
+### Fixed
+- The CDN host guard now rejects a URL that carries credentials before the
+  host, so `https://media-hls.doppiocdn.com@evil.example/` cannot slip through
+  as the CDN host while the request goes elsewhere.
+
 ## [0.5.1] - 2026-11-15
 
 ### Fixed
