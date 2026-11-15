@@ -104,7 +104,7 @@ stripchat-recorder doctor                              # ffmpeg, folder, API
 ## Architecture
 
 ```
-core/            stripchat-recorder-core: the engine (site client, HLS parsing, the
+core/            stripchat-core: the engine (site client, HLS parsing, the
                  recording loop and its append-only writer, ffmpeg, jobs)
 cli/             stripchat-recorder headless CLI (clap)
 app/             Tauri 2 desktop app: React 18 + TypeScript frontend,

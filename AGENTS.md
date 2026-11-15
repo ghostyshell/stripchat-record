@@ -6,7 +6,7 @@ stack and design family with Keepsake Atelier, GODsend 360 and GODsend PSP
 
 ## Components
 
-- **`core/` (`stripchat-recorder-core`)**: framework-agnostic engine. `site` (room
+- **`core/` (`stripchat-core`)**: framework-agnostic engine. `site` (room
   lookup, cookies, playlist requests), `hls` (playlist parsing, variant
   choice), `recorder` (the live loop and the append-only part writer), `media`
   (ffmpeg remux, mux and CRF presets), `jobs` (queue with progress and cancel),
