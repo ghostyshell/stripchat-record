@@ -3,6 +3,11 @@
 All notable changes to **stripchat-record** are listed here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.2] - 2026-11-15
+
+### Added
+- Project site at https://ghostyshell.github.io/stripchat-record/ (served from `docs/`), with an icon set (`docs/icon.svg`, plus 512, 192, 32 and Apple touch PNGs) and a README Website badge.
+
 ## [0.4.1] - 2026-07-15
 
 ### Added

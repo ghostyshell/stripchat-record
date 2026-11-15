@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="stripchat-record">
+  <defs>
+    <linearGradient id="rec-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1a0710"/>
+      <stop offset="1" stop-color="#08040a"/>
+    </linearGradient>
+    <linearGradient id="rec-accent" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff8a9b"/>
+      <stop offset="1" stop-color="#f43f5e"/>
+    </linearGradient>
+    <radialGradient id="rec-glow">
+      <stop offset="0" stop-color="#f43f5e" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#f43f5e" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#rec-bg)"/>
+  <circle cx="128" cy="128" r="104" fill="url(#rec-glow)"/>
+  <circle cx="128" cy="128" r="62" fill="none" stroke="url(#rec-accent)" stroke-width="12" opacity="0.5"/>
+  <circle cx="128" cy="128" r="26" fill="url(#rec-accent)"/>
+</svg>
