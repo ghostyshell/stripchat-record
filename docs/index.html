@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>stripchat-record - a headless WebRTC recorder at source resolution</title>
+<meta name="description" content="Record Stripchat live streams at source resolution over direct WebRTC. Stream only, no page UI or chat in the file, optional duration, splits into parts and remuxes to MP4 with ffmpeg.">
+<meta name="theme-color" content="#04060c">
+<link rel="canonical" href="https://ghostyshell.github.io/stripchat-record/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="stripchat-record">
+<meta property="og:title" content="stripchat-record">
+<meta property="og:description" content="A headless recorder for Stripchat live streams at source resolution over WebRTC.">
+<meta property="og:url" content="https://ghostyshell.github.io/stripchat-record/">
+<meta property="og:image" content="https://ghostyshell.github.io/stripchat-record/icon.png">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="https://ghostyshell.github.io/stripchat-record/icon.png">
+<link rel="icon" href="icon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #04060c;
+    --ink: #e9eefc;
+    --muted: #98a6c0;
+    --line: rgba(255, 255, 255, .09);
+    --accent: #f43f5e;
+    --font: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.65 var(--font);
+         -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+  a { color: inherit; }
+  .bg { position: fixed; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; }
+  .blob { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .5;
+          mix-blend-mode: screen; will-change: transform; }
+  .b1 { width: 52vw; height: 52vw; top: -18vw; left: -10vw;
+        background: radial-gradient(circle, var(--accent) 0%, transparent 66%);
+        animation: drift1 30s ease-in-out infinite alternate; }
+  .b2 { width: 40vw; height: 40vw; bottom: -14vw; right: -12vw; opacity: .3;
+        background: radial-gradient(circle, #f59e0b 0%, transparent 68%);
+        animation: drift2 26s ease-in-out infinite alternate; }
+  @keyframes drift1 { to { transform: translate3d(7vw, 6vh, 0) scale(1.18); } }
+  @keyframes drift2 { to { transform: translate3d(-6vw, -8vh, 0) scale(1.12); } }
+  .mesh { position: absolute; inset: 0;
+    background-image: linear-gradient(rgba(255,255,255,.04) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(255,255,255,.04) 1px, transparent 1px);
+    background-size: 68px 68px;
+    -webkit-mask-image: radial-gradient(ellipse 90% 55% at 50% 0%, #000 5%, transparent 70%);
+    mask-image: radial-gradient(ellipse 90% 55% at 50% 0%, #000 5%, transparent 70%); }
+
+  .wrap { position: relative; z-index: 1; max-width: 64rem; margin: 0 auto; padding: 0 1.5rem 4rem; }
+  nav { position: sticky; top: 1rem; z-index: 20; display: flex; align-items: center;
+        justify-content: space-between; gap: 1rem; margin-top: 1rem; padding: .5rem .6rem .5rem .9rem;
+        border-radius: 999px; background: rgba(10,15,27,.55); border: 1px solid var(--line);
+        -webkit-backdrop-filter: blur(18px) saturate(150%); backdrop-filter: blur(18px) saturate(150%);
+        box-shadow: 0 1px 0 rgba(255,255,255,.07) inset, 0 18px 40px -28px #000; }
+  .brand { display: flex; align-items: center; gap: .6rem; text-decoration: none; font-weight: 600; }
+  .brand img { width: 26px; height: 26px; border-radius: 7px;
+               box-shadow: 0 0 16px color-mix(in oklab, var(--accent) 55%, transparent); }
+  .navlinks { display: flex; gap: .25rem; }
+  .navlinks a { text-decoration: none; font-family: var(--mono); font-size: .7rem; letter-spacing: .08em;
+                text-transform: uppercase; color: var(--muted); padding: .45rem .8rem; border-radius: 999px;
+                transition: color .25s, background .25s; }
+  .navlinks a:hover, .navlinks a:focus-visible { color: #fff; background: rgba(255,255,255,.07); outline: none; }
+
+  .hero { padding: 4.5rem 0 1rem; text-align: center; }
+  .hero img { width: 92px; height: 92px; border-radius: 22px; display: block; margin: 0 auto 1.6rem;
+              box-shadow: 0 24px 60px -24px color-mix(in oklab, var(--accent) 90%, transparent),
+                          0 0 0 1px rgba(255,255,255,.08) inset; }
+  h1 { margin: 0 auto 1.1rem; max-width: 22ch; font-size: clamp(2.1rem, 5.4vw, 3.5rem); line-height: 1.04;
+       letter-spacing: -.035em; font-weight: 700; }
+  h1 span { background: linear-gradient(100deg, #ffb3c0, var(--accent) 55%, #fbbf24);
+            -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lede { margin: 0 auto 1.6rem; max-width: 40rem; color: var(--muted); font-size: 1.05rem; }
+  .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: .4rem; margin: 0 0 1.8rem; padding: 0; list-style: none; }
+  .chips li { font-family: var(--mono); font-size: .68rem; letter-spacing: .09em; text-transform: uppercase;
+              color: #b9c7de; border: 1px solid var(--line); background: rgba(255,255,255,.04);
+              padding: .35rem .7rem; border-radius: 999px; }
+  .cta { display: flex; flex-wrap: wrap; justify-content: center; gap: .6rem; }
+  .btn { display: inline-flex; align-items: center; gap: .45rem; text-decoration: none; font-family: var(--mono);
+         font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; padding: .78rem 1.25rem;
+         border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,.05); color: #e6ecf9;
+         transition: transform .25s, background .25s, border-color .25s, box-shadow .25s; }
+  .btn:hover, .btn:focus-visible { transform: translateY(-2px); outline: none;
+    border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+    background: color-mix(in oklab, var(--accent) 16%, transparent); }
+  .btn.solid { background: linear-gradient(100deg, color-mix(in oklab, var(--accent) 30%, transparent), rgba(251,191,36,.14));
+               border-color: color-mix(in oklab, var(--accent) 55%, transparent); color: #fff; }
+
+  h2.sec { margin: 4.5rem 0 1.2rem; font-family: var(--mono); font-size: .74rem; font-weight: 500;
+           letter-spacing: .2em; text-transform: uppercase; color: var(--muted); }
+  ul.feats { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem;
+             grid-template-columns: repeat(auto-fit, minmax(min(100%, 18.5rem), 1fr)); }
+  ul.feats li { padding: 1.35rem; border-radius: 18px; border: 1px solid var(--line);
+                background: linear-gradient(158deg, rgba(255,255,255,.075), rgba(255,255,255,.02) 60%, rgba(255,255,255,.04));
+                -webkit-backdrop-filter: blur(18px) saturate(150%); backdrop-filter: blur(18px) saturate(150%);
+                box-shadow: 0 1px 0 rgba(255,255,255,.07) inset, 0 20px 40px -32px #000;
+                transition: transform .4s cubic-bezier(.2,.7,.2,1), border-color .4s, box-shadow .4s; }
+  ul.feats li:hover { transform: translateY(-4px); border-color: color-mix(in oklab, var(--accent) 40%, transparent);
+                      box-shadow: 0 26px 50px -32px color-mix(in oklab, var(--accent) 65%, transparent); }
+  ul.feats h3 { margin: 0 0 .45rem; font-size: 1rem; letter-spacing: -.01em; }
+  ul.feats p { margin: 0; color: #a9b8ce; font-size: .92rem; }
+
+  ol.steps { list-style: none; counter-reset: s; margin: 0; padding: 0; display: grid; gap: 1.1rem; }
+  ol.steps > li { counter-increment: s; position: relative; padding-left: 2.9rem; }
+  ol.steps > li::before { content: counter(s); position: absolute; left: 0; top: .1rem; width: 2rem; height: 2rem;
+    display: grid; place-items: center; border-radius: 50%; font-family: var(--mono); font-size: .8rem;
+    color: #ffd9e0; background: color-mix(in oklab, var(--accent) 18%, transparent);
+    border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent); }
+  ol.steps h3 { margin: .25rem 0 .4rem; font-size: 1rem; }
+  ol.steps p { margin: 0 0 .6rem; color: #a9b8ce; font-size: .94rem; }
+  pre { margin: 0; padding: .85rem 1rem; border-radius: 12px; border: 1px solid var(--line);
+        background: rgba(6,10,18,.72); font-family: var(--mono); font-size: .82rem; color: #c7d6ee;
+        overflow-x: auto; -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  p code, li code { font-family: var(--mono); background: rgba(255,255,255,.07); padding: .1rem .35rem; white-space: nowrap;
+                    border-radius: 5px; color: #dbe6f8; font-size: .88em; }
+  .note { margin: 1.6rem 0 0; padding: .9rem 1.1rem; border-radius: 12px; font-size: .9rem; color: #f3d6b4;
+          border: 1px solid rgba(240,180,95,.3); background: rgba(240,180,95,.08); }
+
+  footer.site { margin-top: 4.5rem; padding-top: 1.6rem; border-top: 1px solid var(--line);
+                display: flex; flex-wrap: wrap; gap: .8rem; justify-content: space-between;
+                font-family: var(--mono); font-size: .74rem; color: #7d8aa1; }
+  footer.site a { color: #a9b8ce; text-decoration: none; border-bottom: 1px solid transparent; }
+  footer.site a:hover, footer.site a:focus-visible { color: #fff; border-bottom-color: currentColor; outline: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .blob { animation: none !important; }
+    ul.feats li:hover, .btn:hover { transform: none; }
+  }
+  @media (max-width: 34rem) {
+    .hero { padding: 3rem 0 .5rem; }
+    nav { top: .5rem; margin-top: .5rem; }
+    .navlinks a { padding: .4rem .55rem; font-size: .64rem; }
+  }
+</style>
+</head>
+<body>
+<div class="bg" aria-hidden="true">
+  <span class="blob b1"></span>
+  <span class="blob b2"></span>
+  <div class="mesh"></div>
+</div>
+
+<div class="wrap">
+  <nav aria-label="Main">
+    <a class="brand" href="./"><img src="icon.png" width="26" height="26" alt=""> stripchat-record</a>
+    <div class="navlinks">
+      <a href="#features">Features</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/ghostyshell/stripchat-record">GitHub</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <img src="icon.png" width="92" height="92" alt="stripchat-record icon">
+    <h1>Record a live stream at <span>source resolution</span>.</h1>
+    <p class="lede">A headless WebRTC recorder for Stripchat live streams. It talks to the stream edge directly, asks for the source quality, and writes a file with no page UI, chat or sidebar in it.</p>
+    <ul class="chips">
+      <li>Python 3.10+</li>
+      <li>ffmpeg</li>
+      <li>Playwright</li>
+      <li>18+</li>
+    </ul>
+    <div class="cta">
+      <a class="btn solid" href="#install">Install it</a>
+      <a class="btn" href="https://github.com/ghostyshell/stripchat-record">Source</a>
+    </div>
+  </header>
+
+  <main>
+    <h2 class="sec" id="features">What it does</h2>
+    <ul class="feats">
+      <li>
+        <h3>Source quality, not the page default</h3>
+        <p>It connects to the Doppio CDN WebRTC edge and upgrades the stream to <code>source</code> before recording starts.</p>
+      </li>
+      <li>
+        <h3>Stream only</h3>
+        <p>The browser loads a blank WebRTC client instead of the site, so no page chrome, chat or overlays reach the file.</p>
+      </li>
+      <li>
+        <h3>Runs until the stream ends</h3>
+        <p>By default it records until the model goes offline. Add <code>--duration 60</code> and it stops on the clock instead.</p>
+      </li>
+      <li>
+        <h3>Splits into parts</h3>
+        <p>Long sessions are cut into 1 GB parts by default, each remuxed to MP4 with ffmpeg. Set <code>--split-size 500M</code>, or <code>0</code> for one file.</p>
+      </li>
+      <li>
+        <h3>Output where you want it</h3>
+        <p>Pass <code>--output-dir ~/Videos/recordings</code>, or a full path with <code>--output</code>. Keep the raw <code>.webm</code> with <code>--no-remux</code>.</p>
+      </li>
+      <li>
+        <h3>Headless by default</h3>
+        <p>Chromium runs without a window and is installed on first run. <code>--headed</code> shows it when you want to watch.</p>
+      </li>
+    </ul>
+
+    <h2 class="sec" id="install">Install</h2>
+    <ol class="steps">
+      <li>
+        <h3>Check the requirements</h3>
+        <p>Python 3.10 or later, and ffmpeg on your PATH for the MP4 remux. Chromium comes with Playwright on the first run.</p>
+        <pre>brew install python ffmpeg     # macOS
+# winget install ffmpeg        # Windows, or grab a build from ffmpeg.org</pre>
+      </li>
+      <li>
+        <h3>Run the launcher</h3>
+        <p>The script creates a virtual environment, installs the packages and downloads Chromium the first time.</p>
+        <pre>git clone https://github.com/ghostyshell/stripchat-record.git
+cd stripchat-record
+chmod +x run.sh
+./run.sh MODEL_USERNAME</pre>
+        <p>On Windows use <code>run.bat MODEL_USERNAME</code> instead.</p>
+      </li>
+      <li>
+        <h3>Common flags</h3>
+        <pre>./run.sh NAME --duration 60          # record for one minute
+./run.sh NAME --output-dir ~/Videos  # choose the folder
+./run.sh NAME --split-size 500M      # smaller parts
+./run.sh NAME --no-remux             # keep the .webm
+./run.sh NAME --headed               # show the browser</pre>
+      </li>
+    </ol>
+
+    <p class="note">Use it only for streams you have the right to record. Nothing here bypasses an account, a paywall or a consent gate; it joins the public stream the page already plays.</p>
+  </main>
+
+  <footer class="site">
+    <span>Source on <a href="https://github.com/ghostyshell/stripchat-record">GitHub</a> · <a href="https://github.com/ghostyshell/stripchat-record#readme">Readme</a> · <a href="https://github.com/ghostyshell/stripchat-record/blob/main/CHANGELOG.md">Changelog</a></span>
+    <span><a href="https://ghostyshell.github.io/">More GhostShell projects</a></span>
+  </footer>
+</div>
+</body>
+</html>
