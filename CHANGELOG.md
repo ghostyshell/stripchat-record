@@ -3,38 +3,23 @@
 All notable changes to **stripchat-record** are listed here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.4.1] - 2026-07-15
+## [0.5.0] - 2026-11-15
 
 ### Added
-- `AGENTS.md` as the single source of truth for agent instructions, plus `.cursor/rules/graphify.mdc` and the cross-tool docs/instruction sync workflow (`sync-docs`, no-em-dashes rule, pre-push hook).
+- Tauri 2 + Rust desktop app for macOS, Windows and Linux, replacing the
+  Python Playwright recorder. React frontend with Record, Library, Convert and
+  Settings pages, a job queue with progress and cancel, and a `?mock=1`
+  fixture bridge for UI work without a network.
+- `stripchat-recorder-core` engine: site API + MOUFLON v2 URI decoding + fMP4 recording
+- `stripchat-recorder-cli` headless CLI: `record`, `convert`, `presets`, `library`,
+  `doctor`.
+- Recording is append-only and per segment, so a dropped connection or a hard
+  kill leaves a playable `.recording.mp4` instead of a corrupt file.
+- Size-based splitting into `-partNNN` files, each with its own init segment.
+- Conversion presets (H.264 / H.265 CRF, 720p downscale) modelled on Keepsake
+  Atelier's rip settings, plus a lossless remux.
+- Site page at https://ghostyshell.github.io/stripchat-record/, guides, AGENTS.md and DESIGN.md.
 
-## [0.4.0] - 2026-06-27
-
-### Added
-- Discord and Ko-fi support badges in the README.
-- `--split-size` flag (default `1G`): long recordings rotate into `-partNNN.webm`
-  files instead of one fragile huge file. Each part is remuxed to `.mp4`
-  individually. Use `--split-size 0` to record a single file.
-- Viewport matching: the headless Chromium window is sized to the stream's
-  native aspect ratio.
-- Graceful Ctrl+C shutdown: the current split part is saved before exit.
-- Live recording duration and size in the terminal while recording.
-- `CHANGELOG.md`, `CLAUDE.md`, `.cursor/rules/sync-docs.mdc`, `.githooks/`, and
-  `scripts/install-hooks.sh` for cross-tool agent workflows.
-
-### Fixed
-- Stream-failure saves and default to headless recording.
-- Ctrl+C save during split recording.
-
-## [0.1.0] - 2025-06-19
-
-### Added
-- Initial release: Stripchat WebRTC stream recorder.
-  - Fetches `streamName` from the broadcasts API.
-  - Connects to the Doppio WebRTC edge and upgrades to `source` quality.
-  - Records the raw `MediaStream` with `MediaRecorder`.
-  - Remuxes to `.mp4` with ffmpeg.
-
-[0.4.1]: https://github.com/ghostyshell/stripchat-record/releases/tag/v0.4.1
-[0.4.0]: https://github.com/ghostyshell/stripchat-record/releases/tag/v0.4.0
-[0.1.0]: https://github.com/ghostyshell/stripchat-record/releases/tag/v0.1.0
+### Removed
+- The Python recorder, `webrtc_client.html`, `run.sh` / `run.bat` and the
+  Playwright/Chromium dependency.

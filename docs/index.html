@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Stripchat Recorder - record live rooms at source quality</title>
+<meta name="description" content="Record Stripchat live rooms at source quality straight from the CDN. No screen capture, no browser, no re-encode." />
+<meta name="theme-color" content="#04060c" />
+<meta name="robots" content="index, follow, max-image-preview:large" />
+<link rel="canonical" href="https://ghostyshell.github.io/stripchat-record/" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="Stripchat Recorder" />
+<meta property="og:url" content="https://ghostyshell.github.io/stripchat-record/" />
+<meta property="og:title" content="Stripchat Recorder - record live rooms at source quality" />
+<meta property="og:description" content="Record Stripchat live rooms at source quality straight from the CDN. No screen capture, no browser, no re-encode." />
+<meta property="og:image" content="https://ghostyshell.github.io/stripchat-record/og.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="Stripchat Recorder - record live rooms at source quality" />
+<meta name="twitter:description" content="Record Stripchat live rooms at source quality straight from the CDN. No screen capture, no browser, no re-encode." />
+<meta name="twitter:image" content="https://ghostyshell.github.io/stripchat-record/og.png" />
+<link rel="icon" href="mark.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="icon-180.png" />
+<link rel="stylesheet" href="site.css" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Stripchat Recorder",
+  "applicationCategory": "UtilitiesApplication",
+  "operatingSystem": "macOS, Windows, Linux",
+  "url": "https://ghostyshell.github.io/stripchat-record/",
+  "downloadUrl": "https://ghostyshell.github.io/stripchat-record/#downloads",
+  "license": "https://github.com/ghostyshell/stripchat-record/blob/main/LICENSE",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+  "author": { "@type": "Person", "name": "ghosty99", "url": "https://github.com/ghostyshell" },
+  "description": "Record Stripchat live rooms at source quality straight from the CDN. No screen capture, no browser, no re-encode.",
+  "image": "https://ghostyshell.github.io/stripchat-record/og.png"
+}
+</script>
+</head>
+<body>
+<div class="glow"></div>
+<header>
+  <a class="brand" href="./"><img class="mark" src="icon-64.png" alt="" width="26" height="26" /><span>Stripchat Recorder</span></a>
+  <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="primary-nav" aria-label="Menu">
+    <span aria-hidden="true"></span><span aria-hidden="true"></span><span aria-hidden="true"></span>
+  </button>
+  <nav id="primary-nav" aria-label="Primary">
+    <a href="#features">Features</a>
+    <a href="#screens">Screens</a>
+    <a href="#downloads">Downloads</a>
+    <a href="https://github.com/ghostyshell/stripchat-record/blob/main/docs/guides/index.md">Guides</a>
+    <a href="https://github.com/ghostyshell/stripchat-record">GitHub</a>
+  </nav>
+</header>
+
+<main>
+  <section class="hero">
+    <p class="eyebrow">STRIPCHAT RECORDER</p>
+    <h1>Record a live room.<br /><span class="laser">Keep the source quality.</span></h1>
+    <p class="lead">Record a live room, keep its source quality, compress it afterwards if you want.</p>
+    <div class="cta">
+      <a class="btn primary" href="#downloads">Download</a>
+      <a class="btn" href="https://github.com/ghostyshell/stripchat-record">Source</a>
+    </div>
+    <div class="chips">
+      <span class="chip">macOS</span>
+      <span class="chip">Windows</span>
+      <span class="chip">Linux</span>
+      <span class="chip">MIT</span>
+      <span class="chip">Rust + Tauri 2</span>
+    </div>
+  </section>
+
+  <section id="screens">
+    <h2>One window, no browser</h2>
+    <p class="sum">Record, watch the queue, convert what you keep. The demo data shown is fixture data.</p>
+    <div class="shots">
+      <figure class="shot"><img src="site-record.png" alt="Record page" loading="lazy" /><figcaption>Record: check the room, pick a variant, start.</figcaption></figure>
+      <figure class="shot"><img src="site-library.png" alt="Library page" loading="lazy" /><figcaption>Library: everything recorded, with size and date.</figcaption></figure>
+      <figure class="shot"><img src="site-convert.png" alt="Convert page" loading="lazy" /><figcaption>Convert: remux or compress with CRF presets.</figcaption></figure>
+      <figure class="shot"><img src="site-settings.png" alt="Settings page" loading="lazy" /><figcaption>Settings: folder, splitting, proxy, tools.</figcaption></figure>
+    </div>
+  </section>
+
+  <section id="features">
+    <h2>What it does</h2>
+    <p class="sum">Recording is the product. Everything else exists so the file you keep is the right one.</p>
+    <div class="grid">
+      <article class="card"><h3>Direct from the CDN</h3><p>The app reads the site's own HLS playlist and writes every segment as it airs. The file is what the room broadcasts, nothing re-encoded.</p></article>
+      <article class="card"><h3>Source quality</h3><p>The source variant is picked by default; any variant the CDN lists can be chosen. MOUFLON v2 segment paths are decoded in-app.</p></article>
+      <article class="card"><h3>Crash-safe</h3><p>A segment is only appended once it is whole, and every part carries its init segment. A hard kill leaves a playable video, never a half-written one.</p></article>
+      <article class="card"><h3>Split parts</h3><p>Long recordings rotate into new files at a size you choose, 1 GiB by default, without breaking playback.</p></article>
+      <article class="card"><h3>Convert and compress</h3><p>Remux to a clean MP4, or re-encode with H.264 or H.265 CRF presets, the same ones the rip tools use.</p></article>
+      <article class="card"><h3>Headless CLI</h3><p>Every feature is scriptable: record, convert, list and check from a terminal, on macOS, Windows and Linux.</p></article>
+    </div>
+  </section>
+
+  <section id="downloads">
+    <h2>Download</h2>
+    <p class="sum">Builds for macOS (arm64 and x64), Windows and Linux, plus a headless CLI. Not notarized: right-click, Open on first launch.</p>
+    <div id="downloads-table" class="downloads">
+      <p class="pending">Loading the latest build list ...</p>
+    </div>
+  </section>
+
+  <section id="guides">
+    <h2>Guides</h2>
+    <p class="sum">Short, practical walkthroughs. They live in the repository so they stay next to the code.</p>
+    <ul class="guides">
+      <li><a href="https://github.com/ghostyshell/stripchat-record/blob/main/docs/guides/install.md">Install</a> - downloads, ffmpeg, first run</li>
+      <li><a href="https://github.com/ghostyshell/stripchat-record/blob/main/docs/guides/recording.md">Recording a room</a> - variants, duration, parts</li>
+      <li><a href="https://github.com/ghostyshell/stripchat-record/blob/main/docs/guides/library-and-conversion.md">Library and conversion</a> - presets and remuxing</li>
+      <li><a href="https://github.com/ghostyshell/stripchat-record/blob/main/docs/guides/troubleshooting.md">Troubleshooting</a> - 403s, keys, early stops</li>
+      <li><a href="https://github.com/ghostyshell/stripchat-record/blob/main/docs/guides/build-from-source.md">Build from source</a> - toolchain, mock mode, CLI</li>
+    </ul>
+  </section>
+</main>
+
+<footer>
+  <span>Stripchat Recorder - MIT</span>
+  <span class="spacer"></span>
+  <a href="https://ko-fi.com/ghosty99">Ko-fi</a>
+  <a href="https://discord.gg/d3sFnrgpJn">Discord</a>
+  <a href="https://github.com/ghostyshell/stripchat-record">GitHub</a>
+</footer>
+
+<script>
+document.querySelector('.nav-toggle')?.addEventListener('click', function () {
+  const open = this.getAttribute('aria-expanded') === 'true';
+  this.setAttribute('aria-expanded', String(!open));
+  document.getElementById('primary-nav').classList.toggle('open', !open);
+});
+
+fetch('downloads.json?v=' + Date.now(), { cache: 'no-store' })
+  .then((r) => r.json())
+  .then((data) => {
+    const el = document.getElementById('downloads-table');
+    if (!data.artifacts || !data.artifacts.length) {
+      el.innerHTML = '<p class="pending">The first build is being published. The <a href="' + 'https://github.com/ghostyshell/stripchat-record' + '">source</a> builds from one command.</p>';
+      return;
+    }
+    let html = '<table><thead><tr><th>Build</th><th>GoFile</th><th>file.kiwi</th><th>Size</th></tr></thead><tbody>';
+    for (const a of data.artifacts) {
+      const g = a.gofile && a.gofile !== 'EMPTY' ? '<a href="' + a.gofile + '">Download</a>' : 'pending';
+      const k = a.kiwi && a.kiwi !== 'EMPTY' ? '<a href="' + a.kiwi + '">Mirror</a>' : 'pending';
+      html += '<tr><td><code>' + a.name + '</code></td><td>' + g + '</td><td>' + k + '</td><td>' + (a.size || '') + '</td></tr>';
+    }
+    el.innerHTML = html + '</tbody></table>';
+  })
+  .catch(() => {});
+</script>
+</body>
+</html>

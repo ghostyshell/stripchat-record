@@ -1,0 +1,18 @@
+[package]
+name = "stripchat-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Stripchat live stream engine: HLS extraction, AES-128 decrypt, recording, conversion"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+ureq.workspace = true
+directories.workspace = true
+base64.workspace = true
+sha2.workspace = true
