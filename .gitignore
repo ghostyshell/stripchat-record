@@ -1,9 +1,11 @@
-# Python
-.venv/
-__pycache__/
-*.py[cod]
-*.egg-info/
-.pytest_cache/
+# Rust
+target/
+**/*.rs.bk
+
+# Node / Tauri
+node_modules/
+app/dist/
+app/src-tauri/gen/
 
 # Recordings (never commit captured streams)
 output/
@@ -11,11 +13,10 @@ output/
 *.mp4
 *.mov
 
-# Playwright / browser caches
-.playwright/
-
-# Graphify generated graph (regenerate with `graphify .`)
-graphify-out/
+# Local release artifacts
+.release-*/
+.release-publish.lock
+dist/
 
 # OS / editor
 .DS_Store

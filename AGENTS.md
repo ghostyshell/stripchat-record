@@ -1,125 +1,52 @@
-# stripchat-record - agent guide
+# Stripchat Recorder: project overview for agents
 
-## Project overview
+Stripchat Recorder records Stripchat live rooms from the CDN as they air. It shares its code
+stack and design family with Keepsake Atelier, GODsend 360 and GODsend PSP
+(Rust workspace + Tauri 2 + React).
 
-Records Stripchat live WebRTC streams at source resolution without loading the site UI.
+## Components
 
-| File | Role |
-| --- | --- |
-| `record_webrtc.py` | CLI entrypoint: fetches stream metadata, drives Playwright, saves recording |
-| `webrtc_client.html` | Minimal in-browser WebRTC client (Doppio signaling + `MediaRecorder`) |
-| `run.sh` / `run.bat` | Launchers: create venv, install deps, run recorder |
-| `requirements.txt` | Python deps: `playwright`, `httpx` |
-| `AGENTS.md` | Source of truth for agent instructions (read by Claude Code, Cursor, OpenCode) |
-| `CLAUDE.md` | Thin pointer so Claude Code loads this file |
-| `CHANGELOG.md` | Release history |
-| `.cursor/rules/*.mdc` | Cursor rules: `graphify`, `sync-docs` |
-| `.githooks/pre-push` | Version-controlled hook that nudges `/sync-docs` before publishing |
-| `scripts/install-hooks.sh` | One-shot installer pointing git at `.githooks/` |
+- **`core/` (`stripchat-recorder-core`)**: framework-agnostic engine. `site` (room
+  lookup, cookies, playlist requests), `hls` (playlist parsing, variant
+  choice), `recorder` (the live loop and the append-only part writer), `media`
+  (ffmpeg remux, mux and CRF presets), `jobs` (queue with progress and cancel),
+  `library`, `doctor`, `config`.
+- **`cli/` (`stripchat-recorder-cli`)**: headless CLI over core (clap 4).
+- **`app/`**: Tauri 2 desktop app. `app/src-tauri/src/lib.rs` holds the
+  `#[tauri::command]`s; `app/src` is React 18 + TypeScript with one
+  hand-rolled `styles.css` (see DESIGN.md) and a mock bridge in `mock.ts`
+  behind `?mock=1`.
 
-### Data flow
+## Contracts and invariants
 
-1. `GET /api/front/v1/broadcasts/{model}` → `streamName`, `webRTCAppKey`, native `width`/`height`
-2. Playwright loads `webrtc_client.html` (blank page, no Stripchat chrome); viewport is matched to the stream's aspect ratio
-3. WebSocket `wss://edge-webrtc.doppiocdn.com/` → WebRTC negotiation
-4. Quality upgrade: `240p` → max profile (`source`, typically 1280×720)
-5. `MediaRecorder` captures raw stream; `SegmentWriter` rotates files every `--split-size` (1 GiB default), producing `-partNNN.webm`
-6. Stops when `--duration` elapses, or when the stream ends (graceful Ctrl+C saves the current part)
-7. ffmpeg remuxes each part to `.mp4`; `.webm` parts are deleted after successful remux
+- **The recording loop is the product.** A segment is downloaded into memory
+  and only appended once it is whole; every part starts with the init segment.
+  A hard kill must always leave a decodable file. Do not "optimise" this into
+  streaming straight into the file handle.
+- `.recording.mp4` is the in-progress file. Finalizing remuxes it into the
+  real name; on error the recording is kept, never deleted.
+- `core/` stays free of UI and process-framework dependencies.
+- Media fetches go through the SSRF guard (`is_allowed_media_host`); never
+  fetch an arbitrary URL.
+- **Every change ships complete**: bump the version, add a CHANGELOG entry,
+  and update the README/site when user-visible behaviour changes.
 
-## Commands
+## Building and testing
 
-```bash
-# Setup (first time)
-python3 -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-python -m playwright install chromium
-
-# Record until stream ends
-./run.sh MODEL_USERNAME
-
-# Record 60 seconds to custom directory
-./run.sh MODEL_USERNAME --duration 60 --output-dir ~/Videos/recordings
-
-# Record a single file (disable the default 1 GiB splitting)
-./run.sh MODEL_USERNAME --split-size 0
+```sh
+cargo test --workspace                  # unit tests (hls, part writer, jobs)
+cargo check --workspace                 # zero warnings expected
+npm run --prefix app build              # tsc --noEmit + vite build
+npm run --prefix app dev:mock           # browser UI without a network
 ```
 
-Windows: `run.bat MODEL_USERNAME --duration 60 --output-dir D:\recordings`
+## Conventions
 
-Install the git hooks once after cloning (enables the pre-push sync-docs reminder):
-
-```bash
-sh scripts/install-hooks.sh
-```
-
-## CLI flags
-
-| Flag | Default | Purpose |
-| --- | --- | --- |
-| `model` | `roxyheartley` | Stripchat model username |
-| `--duration` | _(none)_ | Seconds to record; omit to record until stream ends |
-| `--split-size` | `1G` | Rotate to a new file when a part reaches this size (`K`/`M`/`G`, or `0`/`none` for one file) |
-| `--output-dir` | `./output` | Directory for output files |
-| `--output` | _(auto)_ | Full output path; overrides `--output-dir` |
-| `--headed` | off | Show the Chromium window (default: headless) |
-| `--no-remux` | off | Keep `.webm` only; skip ffmpeg `.mp4` remux |
-
-## Graphify
-
-This repo includes a graphify knowledge graph at `graphify-out/` (gitignored; regenerate locally).
-
-```bash
-graphify .                  # initial build
-graphify update .           # after code changes (AST-only, no API cost)
-graphify query "how does recording work?"
-```
-
-Agents: see `.cursor/rules/graphify.mdc` - run graphify before exploring the codebase.
-
-## Code conventions
-
-- Keep `record_webrtc.py` as the single Python entrypoint; WebRTC logic stays in `webrtc_client.html`.
-- Match existing argparse patterns when adding flags.
-- Do not commit recordings (`.webm`, `.mp4`) or `.venv/`.
-- After changing `record_webrtc.py` or `webrtc_client.html`, update `README.md`, `CHANGELOG.md`, and `AGENTS.md` if user-facing behaviour changes (use the `sync-docs` skill - see below).
-
-## Keeping docs & instructions in sync
-
-This file (`AGENTS.md`) is the **single source of truth** for agent instructions. `CLAUDE.md` is a thin pointer that makes Claude Code load it; Cursor also reads `.cursor/rules/*.mdc`. When you change instructions here, keep `CLAUDE.md` and the Cursor rules coherent.
-
-### Before every push
-
-1. Run the **`sync-docs`** skill (Claude Code / OpenCode) or follow `.cursor/rules/sync-docs.mdc` (Cursor) to audit `README.md`, `CHANGELOG.md`, `AGENTS.md`, and this file's file table / CLI table against the actual code.
-2. Key facts to keep accurate: the **`--split-size`** flag (default `1G`, produces `-partNNN.webm`), the output path scheme, the CLI flags table, the data flow, and the project layout / file table.
-3. Confirm no em/en dashes in public-facing copy: `rg '[—–]' README.md CHANGELOG.md` (the `humanizer` skill covers the wider de-AI pass for substantive copy).
-4. The `.githooks/pre-push` hook prints a non-blocking reminder; install it once with `sh scripts/install-hooks.sh`.
-
-### After code changes
-
-- Run `graphify update .` to refresh the knowledge graph (AST-only, no API cost). Use `graphify query` before exploring the codebase.
-- Run the **`code-reviewer`** agent after any substantive change; `security-auditor` for input/secret/network surface.
-- Add a `CHANGELOG.md` entry under the release header (bump version/date) for user-visible changes.
-
-### Tool-specific notes
-
-| Tool | Instructions file | Native rules |
-| --- | --- | --- |
-| Claude Code | `CLAUDE.md` → `AGENTS.md` | none needed |
-| OpenCode | `AGENTS.md` | none needed |
-| Cursor | `AGENTS.md` | `.cursor/rules/graphify.mdc`, `.cursor/rules/sync-docs.mdc` |
-
-## External dependencies
-
-- **Python 3.10+** with venv
-- **ffmpeg** on `PATH` for remux (optional but default-on)
-- **Chromium** via Playwright (`python -m playwright install chromium`)
-
-## Git remote
-
-| Remote | URL |
-| --- | --- |
-| `origin` | `https://github.com/ghostyshell/stripchat-record.git` |
-
-Push with: `git push -u origin main`
+- Public-facing copy: no em dashes, no en dashes, ASCII hyphen only.
+- **Version bump + changelog, every change.** No `[Unreleased]` section: newest
+  `## [x.y.z] - YYYY-MM-DD` header at the top. `scripts/check-changelog.sh`
+  enforces it.
+- Frontend types in `app/src/types.ts` mirror the Rust serializers, and the
+  mock fixtures mirror real shapes.
+- Errors: core returns `stripchat-recorder_core::Result<T>`; the Tauri error type
+  serializes as the Display string.

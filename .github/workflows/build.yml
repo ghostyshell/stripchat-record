@@ -1,0 +1,134 @@
+name: build
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  macos:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            name: arm64
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            name: x64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install frontend deps
+        working-directory: app
+        run: npm ci --no-fund --no-audit
+      - name: Unit tests
+        run: cargo test --workspace
+      - name: Build app bundle
+        working-directory: app
+        run: npx tauri build --bundles app --target ${{ matrix.target }}
+      - name: Build CLI
+        run: cargo build --release -p stripchat-recorder-cli --target ${{ matrix.target }}
+      - name: Ad-hoc sign the app bundle
+        run: |
+          # Apple Silicon refuses bundles without a valid bundle signature
+          # (Gatekeeper reports "damaged"); sign after bundling, before the DMG.
+          APP=$(find target/${{ matrix.target }}/release/bundle/macos -name "*.app" | head -1)
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict "$APP"
+      - name: Make installer DMG
+        run: |
+          APP=$(find target/${{ matrix.target }}/release/bundle/macos -name "*.app" | head -1)
+          ./scripts/make-dmg.sh "$APP" "Stripchat Recorder" \
+            "stripchat-recorder-macos-${{ matrix.name }}.dmg" "app/src-tauri/dmg-background.png"
+          tar -czf "stripchat-recorder-cli-macos-${{ matrix.name }}.tar.gz" \
+            -C target/${{ matrix.target }}/release stripchat-recorder
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.name }}
+          path: |
+            *.dmg
+            *.tar.gz
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: System deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf ffmpeg
+      - name: Install frontend deps
+        working-directory: app
+        run: npm ci --no-fund --no-audit
+      - name: Unit tests
+        run: cargo test --workspace
+      - name: Build bundles
+        working-directory: app
+        run: npx tauri build --bundles deb,appimage
+      - name: Build CLI
+        run: |
+          cargo build --release -p stripchat-recorder-cli
+          tar -czf stripchat-recorder-cli-linux-x64.tar.gz -C target/release stripchat-recorder
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x64
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/appimage/*.AppImage
+            stripchat-recorder-cli-linux-x64.tar.gz
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install frontend deps
+        working-directory: app
+        run: npm ci --no-fund --no-audit
+      - name: Unit tests
+        run: cargo test --workspace
+      - name: Build installer
+        working-directory: app
+        shell: bash
+        run: npx tauri build --bundles nsis
+      - name: Build CLI zip
+        shell: pwsh
+        run: |
+          cargo build --release -p stripchat-recorder-cli
+          Compress-Archive -Path target/release/stripchat-recorder.exe -DestinationPath stripchat-recorder-cli-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: |
+            target/release/bundle/nsis/*-setup.exe
+            stripchat-recorder-cli-windows-x64.zip
+
+  ui-check:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install frontend deps
+        working-directory: app
+        run: npm ci --no-fund --no-audit
+      - name: Playwright
+        working-directory: app
+        run: |
+          npx playwright install chromium --with-deps
+          npx playwright test

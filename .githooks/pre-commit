@@ -1,0 +1,3 @@
+#!/bin/bash
+set -euo pipefail
+exec "$(git rev-parse --show-toplevel)/scripts/check-changelog.sh"
