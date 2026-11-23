@@ -18,9 +18,10 @@ Built with a Rust engine, Tauri 2 and React.
 ## Download
 
 <!-- downloads:start -->
-Builds are published per release to GoFile (primary) and file.kiwi (backup).
-Run `scripts/publish-release.sh` to cut one; the table above is rewritten by
-that script.
+| Build | Download | Size |
+| --- | --- | --- |
+| `stripchat-recorder-0.5.2-arm64.dmg` | [Download](https://covers.debrid.in/stripchat-recorder/releases/0.5.2/stripchat-recorder-0.5.2-arm64.dmg) | 5.6 MiB |
+| `stripchat-recorder-cli-0.5.2-macos-arm64.tar.gz` | [Download](https://covers.debrid.in/stripchat-recorder/releases/0.5.2/stripchat-recorder-cli-0.5.2-macos-arm64.tar.gz) | 1.6 MiB |
 <!-- downloads:end -->
 
 The desktop builds are not notarized: right-click, Open, Open on first launch
