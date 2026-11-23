@@ -1,12 +1,12 @@
 #!/bin/bash
-# Upload release artifacts to GoFile (primary) and file.kiwi (backup), rewrite
-# the README download table, commit and push.
+# Build the current version (or take an artifact directory), upload it to
+# Cloudflare R2, rewrite the README table and docs/downloads.json, commit,
+# push, and delete the superseded local artifacts and older R2 versions.
 #
 #   scripts/publish-release.sh --artifacts /path/to/dist
 #   scripts/publish-release.sh                 # build the current version first
 #
 # Environment:
-#   GOFILE_TOKEN   overrides .gofile-io-token
 #   SKIP_PUSH=1    commit but do not push
 set -euo pipefail
 
@@ -56,8 +56,6 @@ trap 'rm -rf "$LOCK"' EXIT
 
 find . -maxdepth 1 -name '.release-*' -type d -mtime +30 -exec rm -rf {} + 2>/dev/null || true
 
-TOKEN=${GOFILE_TOKEN:-$(cat "$REPO/.gofile-io-token" 2>/dev/null || true)}
-[ -n "$TOKEN" ] || die "no GoFile token: write .gofile-io-token or set GOFILE_TOKEN"
 
 log "publishing Stripchat Recorder $V"
 
@@ -76,14 +74,18 @@ else
     *) die "unsupported macOS arch: $ARCH" ;;
   esac
   log "building locally for macOS $PLATARCH (no CI)"
-  ./scripts/fetch-ffmpeg.sh "darwin-$PLATARCH" >/dev/null
+  # ffmpeg is not bundled: the app uses the system binary and shows its path.
   ( cd app && npm run build >/dev/null 2>&1 && npx tauri build --bundles app >/dev/null 2>&1 ) \
     || die "tauri build failed"
   APP=$(find target/release/bundle/macos -name "*.app" | head -1)
   [ -n "$APP" ] || die "no app bundle produced"
   codesign --force --deep --sign - "$APP" >/dev/null 2>&1 || true
-  ./scripts/make-dmg.sh "$APP" "Stripchat Recorder" "$DIST/stripchat-recorder-macos-$PLATARCH.dmg" \
-    "app/src-tauri/dmg-background.png" >/dev/null || die "installer DMG failed"
+  STAGE=$(mktemp -d)
+  cp -R "$APP" "$STAGE/"
+  ln -s /Applications "$STAGE/Applications"
+  hdiutil create -volname "Stripchat Recorder" -srcfolder "$STAGE" -ov -format UDZO \
+    "$DIST/stripchat-recorder-macos-$PLATARCH.dmg" >/dev/null || die "installer DMG failed"
+  rm -rf "$STAGE"
   cargo build --release -p stripchat-recorder-cli >/dev/null 2>&1 || die "cli build failed"
   tar -czf "$DIST/stripchat-recorder-cli-macos-$PLATARCH.tar.gz" -C target/release stripchat-recorder
   # Cross-platform artifacts are built on demand (or copied from a previous
@@ -119,12 +121,54 @@ for f in "$DIST"/*.dmg "$DIST"/*.tar.gz "$DIST"/*.zip "$DIST"/*.AppImage "$DIST"
 done
 log "artifacts: ${FILES[*]}"
 
-# --- 2. Upload ------------------------------------------------------------------
-field() { grep -F "$1 |" "$LINKS" 2>/dev/null | tail -1 | cut -d'|' -f"$2" | sed 's/^ *//;s/ *$//' || true; }
-row() {
-  grep -v -F "$1 |" "$LINKS" > "$LINKS.tmp" 2>/dev/null || true
-  mv "$LINKS.tmp" "$LINKS"
-  printf '%s | %s | %s | %s | %s\n' "$1" "$2" "$3" "$4" "$5" >> "$LINKS"
+# --- 2. Upload to Cloudflare R2 ---------------------------------------------------
+# R2 is the only host. Keys are versioned and immutable, so a link stays valid
+# until the app ships a new version - nothing needs a timed refresh. A publish
+# uploads under <prefix>/<version>/, then prunes older versions (keep 2).
+R2_ENV=${R2_ENV:-$HOME/.r2.env}
+R2_BUCKET=${R2_BUCKET:-torrent-search-covers-eu}
+R2_PREFIX=${R2_PREFIX:-stripchat-recorder/releases}
+R2_PUBLIC=${R2_PUBLIC:-https://covers.debrid.in}
+[ -f "$R2_ENV" ] || die "missing $R2_ENV (R2 S3 keys)"
+set -a; . "$R2_ENV"; set +a
+for v in R2_S3_ENDPOINT R2_S3_ACCESS_KEY_ID R2_S3_SECRET_ACCESS_KEY; do
+  eval "val=\${$v:-}"
+  [ -n "$val" ] || die "$v missing from $R2_ENV"
+done
+command -v aws >/dev/null 2>&1 || die "aws CLI not found on PATH ($PATH)"
+# R2 rejects the extra CRC headers modern aws-cli injects on some builds.
+export AWS_REQUEST_CHECKSUM_CALCULATION=when_required AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+
+r2_aws() {
+  AWS_ACCESS_KEY_ID="$R2_S3_ACCESS_KEY_ID" AWS_SECRET_ACCESS_KEY="$R2_S3_SECRET_ACCESS_KEY" \
+  AWS_DEFAULT_REGION=auto AWS_EC2_METADATA_DISABLED=true \
+    aws "$@" --endpoint-url "$R2_S3_ENDPOINT"
+}
+
+r2_put() {  # $1=local file -> prints the public URL
+  local key="$R2_PREFIX/$V/$(basename "$1")"
+  log "  R2 -> s3://$R2_BUCKET/$key"
+  r2_aws s3 cp "$1" "s3://$R2_BUCKET/$key" \
+    --content-type application/octet-stream \
+    --cache-control 'public, max-age=31536000, immutable' \
+    --only-show-errors || return 1
+  printf '%s\n' "$R2_PUBLIC/$key"
+}
+
+r2_prune() {  # keep the newest $1 versions under the prefix (default 2)
+  local keep=${1:-2} versions total
+  versions=$(r2_aws s3api list-objects-v2 --bucket "$R2_BUCKET" \
+      --prefix "$R2_PREFIX/" --delimiter / \
+      --query 'CommonPrefixes[].Prefix' --output text 2>/dev/null \
+    | tr '\t' '\n' | sed 's#/$##' | awk -F/ '{print $NF}' \
+    | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -t. -k1,1n -k2,2n -k3,3n) || true
+  total=$(printf '%s\n' "$versions" | grep -c . || true)
+  [ "${total:-0}" -gt "$keep" ] || return 0
+  printf '%s\n' "$versions" | sed -n "1,$((total-keep))p" | while IFS= read -r old; do
+    log "R2: pruning $R2_PREFIX/$old/"
+    r2_aws s3 rm "s3://$R2_BUCKET/$R2_PREFIX/$old/" --recursive --only-show-errors \
+      || log "WARNING: R2 prune failed for $old (old objects left in place)"
+  done
 }
 
 human_size() {
@@ -139,51 +183,19 @@ for unit in ("B", "KiB", "MiB", "GiB"):
 PY
 }
 
-put_gofile() {
-  local f=$1 url=""
-  for attempt in 1 2 3; do
-    url=$(curl -sS --max-time 3600 -X POST \
-      "https://upload.gofile.io/contents/uploadfile" \
-      -H "Authorization: Bearer $TOKEN" \
-      -F "file=@$DIST/$f" 2>/dev/null \
-      | python3 -c 'import json,sys
-try:
-    print(json.load(sys.stdin).get("data", {}).get("downloadPage", ""))
-except Exception:
-    print("")' 2>/dev/null) || url=""
-    if [ -n "$url" ]; then printf '%s\n' "$url"; return 0; fi
-    log "  gofile attempt $attempt/3 failed for $f; retrying in 30s"
-    sleep 30
-  done
-  return 1
+row() {
+  grep -v -F "$1 |" "$LINKS" > "$LINKS.tmp" 2>/dev/null || true
+  mv "$LINKS.tmp" "$LINKS"
+  printf '%s | %s | %s | %s\n' "$1" "$2" "$3" "$4" >> "$LINKS"
 }
 
-put_kiwi() {
-  FORCE_COLOR=0 npx -y @file-kiwi/node "$DIST/$1" --title "$1" 2>&1 \
-    | grep -Eo 'https://file\.kiwi/[A-Za-z0-9][A-Za-z0-9#_+/=-]*' | tail -1 || true
-}
-
-incomplete=0
+: > "$LINKS"
 for f in "${FILES[@]}"; do
-  gf=$(field "$f" 2)
-  kw=$(field "$f" 3)
-  if [ -n "$gf" ] && [ "$gf" != "EMPTY" ] && [ -n "$kw" ] && [ "$kw" != "EMPTY" ]; then
-    log "[skip] $f already uploaded"
-    continue
-  fi
   size=$(human_size "$DIST/$f")
   sha=$(shasum -a 256 "$DIST/$f" | cut -d' ' -f1)
-  log "[start] $f ($size)"
-  if [ -z "$gf" ] || [ "$gf" = "EMPTY" ]; then
-    gf=$(put_gofile "$f") || gf="EMPTY"
-  fi
-  if [ -z "$kw" ] || [ "$kw" = "EMPTY" ]; then
-    kw=$(put_kiwi "$f")
-  fi
-  [ -n "$gf" ] && [ "$gf" != "EMPTY" ] || incomplete=1
-  [ -n "$kw" ] && [ "$kw" != "EMPTY" ] || incomplete=1
-  log "[done] $f | ${gf:-EMPTY} | ${kw:-EMPTY}"
-  row "$f" "${gf:-EMPTY}" "${kw:-EMPTY}" "$size" "$sha"
+  log "[upload] $f ($size)"
+  url=$(r2_put "$DIST/$f") || die "R2 upload failed for $f"
+  row "$f" "$url" "$size" "$sha"
 done
 
 # --- 3. Rewrite the README table -------------------------------------------------
@@ -193,12 +205,11 @@ python3 -I scripts/patch-release-links.py "$LINKS" "$V" || die "could not patch 
 if git diff --quiet -- README.md docs/downloads.json; then
   log "download links already current - nothing to commit"
 else
-  git add README.md
-  git commit -q -m "docs: refresh ${V} download links (GoFile + file.kiwi)
+  git add README.md docs/downloads.json
+  git commit -q -m "docs: publish ${V} downloads to Cloudflare R2
 
-Weekly mirror refresh: the current version is rebuilt and re-uploaded to
-GoFile (primary) and file.kiwi (backup). Free-tier links expire, so the
-README table is repointed at the fresh mirrors." || die "git commit failed"
+One host, versioned keys: the links stay valid until the next version, so no
+weekly mirror refresh is needed any more." || die "git commit failed"
   if [ "${SKIP_PUSH:-0}" = "1" ]; then
     log "SKIP_PUSH=1: links committed locally; not pushed"
   else
@@ -208,7 +219,7 @@ README table is repointed at the fresh mirrors." || die "git commit failed"
     # minutes, so a cache-busted request is the only reliable check.
     log "verifying the live site feed"
     sleep 20
-    LIVE=$(curl -fsS "https://ghostyshell.github.io/stripchat-recorder/downloads.json?v=$(date +%s)" 2>/dev/null \
+    LIVE=$(curl -fsS "https://ghostyshell.github.io/stripchat-record/downloads.json?v=$(date +%s)" 2>/dev/null \
       | python3 -c 'import json,sys
 try:
     print(json.load(sys.stdin).get("version",""))
@@ -222,9 +233,15 @@ except Exception:
   fi
 fi
 
-if [ "$incomplete" -ne 0 ]; then
-  log "WARNING: at least one mirror is missing - run again to finish"
-else
-  log "all mirrors uploaded"
+log "pruning old R2 versions (keeping the current and previous)"
+r2_prune 2
+
+# The rebuild's output is disposable now that R2 has it. An external
+# --artifacts directory is left alone, it is not ours to delete.
+if [ "${KEEP_DIST:-0}" = "1" ]; then
+  log "KEEP_DIST=1: artifacts kept at $DIST"
+elif [ -z "$ARTIFACTS" ]; then
+  log "removing local artifacts"
+  rm -rf "$DIST"
 fi
 log "done"

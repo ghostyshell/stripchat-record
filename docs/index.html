@@ -140,11 +140,10 @@ fetch('downloads.json?v=' + Date.now(), { cache: 'no-store' })
       el.innerHTML = '<p class="pending">The first build is being published. The <a href="' + 'https://github.com/ghostyshell/stripchat-record' + '">source</a> builds from one command.</p>';
       return;
     }
-    let html = '<table><thead><tr><th>Build</th><th>GoFile</th><th>file.kiwi</th><th>Size</th></tr></thead><tbody>';
+    let html = '<table><thead><tr><th>Build</th><th>Download</th><th>Size</th></tr></thead><tbody>';
     for (const a of data.artifacts) {
-      const g = a.gofile && a.gofile !== 'EMPTY' ? '<a href="' + a.gofile + '">Download</a>' : 'pending';
-      const k = a.kiwi && a.kiwi !== 'EMPTY' ? '<a href="' + a.kiwi + '">Mirror</a>' : 'pending';
-      html += '<tr><td><code>' + a.name + '</code></td><td>' + g + '</td><td>' + k + '</td><td>' + (a.size || '') + '</td></tr>';
+      const g = a.url ? '<a href="' + a.url + '">Download</a>' : 'pending';
+      html += '<tr><td><code>' + a.name + '</code></td><td>' + g + '</td><td>' + (a.size || '') + '</td></tr>';
     }
     el.innerHTML = html + '</tbody></table>';
   })

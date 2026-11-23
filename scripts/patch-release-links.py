@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Rewrite the README download table from an upload manifest.
+"""Rewrite the README download table from an R2 upload manifest.
 
-Usage: python3 -I scripts/patch-release-links.py <links.txt>
+Usage: python3 -I scripts/patch-release-links.py <links.txt> [version]
 
-Rows are `name | gofile-url | kiwi-url | size | sha256`. A row whose URL is
-missing or EMPTY still appears with `pending`, so a failed mirror never blanks
-out the half that worked.
+Rows are `name | url | size | sha256`. A row whose URL is missing or EMPTY
+still appears with `pending`, so a failed upload never blanks out a row that
+worked. Writes docs/downloads.json, which the site reads at runtime.
 """
 import datetime
 import json
@@ -15,8 +15,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 README = ROOT / "README.md"
+MANIFEST = ROOT / "docs" / "downloads.json"
 START = "<!-- downloads:start -->"
 END = "<!-- downloads:end -->"
+
+# The PS3/Switch CLIs ship an MCP server too; their labels say so.
+CLI_SUFFIX = ""
 
 
 def label_for(name):
@@ -25,10 +29,11 @@ def label_for(name):
         return "macOS (Intel)" if "x64" in low else "macOS (Apple Silicon)"
     if low.endswith(".tar.gz"):
         if "linux" in low:
-            return "Linux (x86_64, CLI)"
-        return "macOS (Intel, CLI)" if "x64" in low else "macOS (Apple Silicon, CLI)"
+            return f"Linux (x86_64, CLI{CLI_SUFFIX})"
+        arch = "Intel" if "x64" in low else "Apple Silicon"
+        return f"macOS ({arch}, CLI{CLI_SUFFIX})"
     if low.endswith(".zip"):
-        return "Windows (x86_64, CLI)"
+        return f"Windows (x86_64, CLI{CLI_SUFFIX})"
     if low.endswith(".appimage"):
         return "Linux (x86_64, AppImage)"
     if low.endswith(".deb"):
@@ -38,75 +43,89 @@ def label_for(name):
     return name
 
 
-def cell(url, text):
-    return f"[{text}]({url})" if url and url != "EMPTY" else "pending"
+def cell(url):
+    return f"[Download]({url})" if url and url != "EMPTY" else "pending"
 
 
-def main():
-    manifest = Path(sys.argv[1])
-    version_arg = sys.argv[2] if len(sys.argv) > 2 else ""
+def order(name):
+    low = name.lower()
+    if low.endswith(".dmg"):
+        return (0, name)
+    if low.endswith(".exe"):
+        return (1, name)
+    if low.endswith(".appimage"):
+        return (2, name)
+    if low.endswith(".deb"):
+        return (3, name)
+    return (4, name)
+
+
+def load(path):
     rows = []
-    for line in manifest.read_text().splitlines():
+    for line in Path(path).read_text().splitlines():
         parts = [p.strip() for p in line.split("|")]
-        if len(parts) >= 3:
-            rows.append(parts)
+        if len(parts) >= 2 and parts[0]:
+            rows.append((parts + [""] * 4)[:4])
+    return rows
 
-    def sort_key(row):
-        name = row[0].lower()
-        family = (
-            "dmg" if name.endswith(".dmg")
-            else "exe" if name.endswith(".exe")
-            else "appimage" if name.endswith(".appimage")
-            else "deb" if name.endswith(".deb")
-            else "cli"
-        )
-        return (family, name)
 
-    rows.sort(key=sort_key)
-    table = [
-        "| Build | GoFile (primary) | file.kiwi (backup) | Size |",
-        "| --- | --- | --- | --- |",
-    ]
-    for name, gofile, kiwi, size, *_ in rows:
-        table.append(
-            f"| `{name}` | {cell(gofile, 'Download')} | {cell(kiwi, 'Mirror')} | {size or ''} |"
-        )
-
+def build(rows, version):
     artifacts = [
         {
             "name": name,
             "label": label_for(name),
-            "gofile": "" if gofile == "EMPTY" else gofile,
-            "kiwi": "" if kiwi == "EMPTY" else kiwi,
-            "size": size or "",
-            "sha256": sha or "",
+            "url": "" if url == "EMPTY" else url,
+            "size": size,
+            "sha256": sha,
         }
-        for name, gofile, kiwi, size, sha, *_ in [row[:5] for row in rows]
+        for name, url, size, sha in sorted(rows, key=lambda r: order(r[0]))
     ]
-    version = version_arg
     if not version and artifacts:
-        m = re.search(r"\d+\.\d+\.\d+", artifacts[0]["name"])
-        if m:
-            version = m.group(0)
-    (ROOT / "docs" / "downloads.json").write_text(
-        json.dumps(
-            {
-                "version": version,
-                "updated": datetime.date.today().isoformat(),
-                "artifacts": artifacts,
-            },
-            indent=2,
-        )
-        + "\n"
-    )
+        match = re.search(r"\d+\.\d+\.\d+", artifacts[0]["name"])
+        if match:
+            version = match.group(0)
+    return {"version": version, "updated": datetime.date.today().isoformat(), "artifacts": artifacts}
 
+
+def table(manifest):
+    lines = ["| Build | Download | Size |", "| --- | --- | --- |"]
+    for art in manifest["artifacts"]:
+        lines.append(f"| `{art['name']}` | {cell(art['url'])} | {art['size'] or 'pending'} |")
+    return "\n".join(lines)
+
+
+def patch_readme(manifest):
     text = README.read_text()
     start = text.index(START) + len(START)
     end = text.index(END)
-    new = text[:start] + "\n" + "\n".join(table) + "\n" + text[end:]
-    README.write_text(new)
-    print(f"patched {len(rows)} rows in README.md")
+    README.write_text(text[:start] + "\n" + table(manifest) + "\n" + text[end:])
+
+
+def demo():
+    rows = [
+        ("godsend-x-1.0.0-arm64.dmg", "https://covers.debrid.in/x/releases/1.0.0/godsend-x-1.0.0-arm64.dmg", "5.4 MiB", "a"),
+        ("godsend-x-cli-1.0.0-windows-x64.zip", "EMPTY", "2.1 MiB", "b"),
+    ]
+    m = build(rows, "")
+    assert m["version"] == "1.0.0", m["version"]
+    t = table(m)
+    assert "| `godsend-x-1.0.0-arm64.dmg` | [Download](https://covers.debrid.in/x/releases/1.0.0/godsend-x-1.0.0-arm64.dmg) | 5.4 MiB |" in t, t
+    assert "| `godsend-x-cli-1.0.0-windows-x64.zip` | pending | 2.1 MiB |" in t, t
+    assert m["artifacts"][1]["url"] == "" and m["artifacts"][0]["url"].startswith("https://"), m
+    print("demo OK")
 
 
 if __name__ == "__main__":
-    main()
+    if "--demo" in sys.argv:
+        demo()
+    elif len(sys.argv) < 2:
+        raise SystemExit(__doc__)
+    else:
+        rows = load(sys.argv[1])
+        if not rows:
+            raise SystemExit("no usable rows in the upload manifest")
+        manifest = build(rows, sys.argv[2] if len(sys.argv) > 2 else "")
+        MANIFEST.parent.mkdir(parents=True, exist_ok=True)
+        MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n")
+        patch_readme(manifest)
+        print(f"patched {len(rows)} rows for {manifest['version']}")

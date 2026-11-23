@@ -3656,7 +3656,7 @@ dependencies = [
 
 [[package]]
 name = "stripchat-core"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "base64 0.22.1",
  "directories",
@@ -3670,7 +3670,7 @@ dependencies = [
 
 [[package]]
 name = "stripchat-recorder-app"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -3686,7 +3686,7 @@ dependencies = [
 
 [[package]]
 name = "stripchat-recorder-cli"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "clap",
  "ctrlc",

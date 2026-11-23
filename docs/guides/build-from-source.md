@@ -40,6 +40,6 @@ scripts/bump-version.sh 0.5.1 "Fixed: ..."
 scripts/publish-release.sh
 ```
 
-The publish script dispatches the all-platform CI build, uploads the artifacts
-to GoFile and file.kiwi, rewrites the README table and `docs/downloads.json`,
+The publish script builds the app, uploads the artifacts to Cloudflare R2,
+rewrites the README table and `docs/downloads.json`, prunes older R2 versions,
 commits, pushes and then checks the live feed.
