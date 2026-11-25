@@ -20,8 +20,8 @@ Built with a Rust engine, Tauri 2 and React.
 <!-- downloads:start -->
 | Build | Download | Size |
 | --- | --- | --- |
-| `stripchat-recorder-0.5.2-arm64.dmg` | [Download](https://covers.debrid.in/stripchat-recorder/releases/0.5.2/stripchat-recorder-0.5.2-arm64.dmg) | 5.6 MiB |
-| `stripchat-recorder-cli-0.5.2-macos-arm64.tar.gz` | [Download](https://covers.debrid.in/stripchat-recorder/releases/0.5.2/stripchat-recorder-cli-0.5.2-macos-arm64.tar.gz) | 1.6 MiB |
+| `stripchat-recorder-0.5.3-arm64.dmg` | [Download](https://covers.debrid.in/stripchat-recorder/releases/0.5.3/stripchat-recorder-0.5.3-arm64.dmg) | 5.6 MiB |
+| `stripchat-recorder-cli-0.5.3-macos-arm64.tar.gz` | [Download](https://covers.debrid.in/stripchat-recorder/releases/0.5.3/stripchat-recorder-cli-0.5.3-macos-arm64.tar.gz) | 1.6 MiB |
 <!-- downloads:end -->
 
 The desktop builds are not notarized: right-click, Open, Open on first launch

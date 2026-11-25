@@ -1,20 +1,20 @@
 {
-  "version": "0.5.2",
-  "updated": "2026-11-24",
+  "version": "0.5.3",
+  "updated": "2026-11-25",
   "artifacts": [
     {
-      "name": "stripchat-recorder-0.5.2-arm64.dmg",
+      "name": "stripchat-recorder-0.5.3-arm64.dmg",
       "label": "macOS (Apple Silicon)",
-      "url": "https://covers.debrid.in/stripchat-recorder/releases/0.5.2/stripchat-recorder-0.5.2-arm64.dmg",
+      "url": "https://covers.debrid.in/stripchat-recorder/releases/0.5.3/stripchat-recorder-0.5.3-arm64.dmg",
       "size": "5.6 MiB",
-      "sha256": "be1853f27725dd79f15ba891e82acded177440ca88553830852cf81a80cc99c0"
+      "sha256": "0258bfd240680cc5bb0c06ec60e65b11ae303bea31efcc0a25bab33fb6dad08e"
     },
     {
-      "name": "stripchat-recorder-cli-0.5.2-macos-arm64.tar.gz",
+      "name": "stripchat-recorder-cli-0.5.3-macos-arm64.tar.gz",
       "label": "macOS (Apple Silicon, CLI)",
-      "url": "https://covers.debrid.in/stripchat-recorder/releases/0.5.2/stripchat-recorder-cli-0.5.2-macos-arm64.tar.gz",
+      "url": "https://covers.debrid.in/stripchat-recorder/releases/0.5.3/stripchat-recorder-cli-0.5.3-macos-arm64.tar.gz",
       "size": "1.6 MiB",
-      "sha256": "75dce69b7210668eb33580b7c48c866b0fe125039e26d1184fce659ebe3c1196"
+      "sha256": "5bfa1011cf877ef247fe297ee31c2a5b8efd28ca1a17490b7526da7501668287"
     }
   ]
 }
