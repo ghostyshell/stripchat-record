@@ -75,7 +75,7 @@ main { max-width: 1060px; margin: 0 auto; padding: 40px 24px 60px; }
 .screens { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin: 46px 0; }
 .shot { display: block; border-radius: 16px; outline-offset: 3px; }
 .screens img { width: 100%; height: auto; border-radius: 16px; border: 1px solid var(--line); box-shadow: 0 30px 70px -50px rgba(0,0,0,.9); display: block; cursor: zoom-in; transition: border-color .16s ease, transform .16s ease; }
-.shot:hover img, .shot:focus-within img { border-color: rgba(86,232,245,.5); transform: translateY(-2px); }
+.shot:hover img, .shot:has(:focus-visible) img { border-color: rgba(86,232,245,.5); transform: translateY(-2px); }
 .lightbox { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; background: rgba(4,6,12,.86); backdrop-filter: blur(6px); padding: 24px; }
 .lightbox[hidden] { display: none; }
 .lightbox img {
@@ -117,7 +117,7 @@ main { max-width: 1060px; margin: 0 auto; padding: 40px 24px 60px; }
 section h2 { font-size: 26px; margin: 46px 0 18px; letter-spacing: -0.01em; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
 .grid article { border: 1px solid var(--line); background: var(--surface); border-radius: 16px; padding: 18px; transition: border-color .18s ease, transform .18s ease; }
-.grid article:hover, .grid article:focus-within { border-color: var(--line-strong); transform: translateY(-2px); }
+.grid article:hover, .grid article:has(:focus-visible) { border-color: var(--line-strong); transform: translateY(-2px); }
 .grid article h3 { margin: 0 0 6px; font-size: 16px; }
 .grid article p { margin: 0; color: var(--dim); font-size: 14px; }
 .grid.guides a { border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; color: var(--text); background: rgba(255,255,255,.02); }
@@ -126,7 +126,7 @@ section h2 { font-size: 26px; margin: 46px 0 18px; letter-spacing: -0.01em; }
 .downloads { overflow-x: auto; } /* ponytail: the build-name column cannot shrink below a phone width */
 .downloads table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .downloads th, .downloads td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); }
-.downloads tbody tr:hover td, .downloads tbody tr:focus-within td { background: rgba(109,139,255,.06); }
+.downloads tbody tr:hover td, .downloads tbody tr:has(:focus-visible) td { background: rgba(109,139,255,.06); }
 .downloads th { font: 11px var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--faint); }
 .downloads code { font-family: var(--mono); font-size: 12.5px; color: var(--dim); }
 footer { border-top: 1px solid var(--line); padding: 26px; display: flex; flex-wrap: wrap; align-items: center; gap: 18px; justify-content: space-between; }
