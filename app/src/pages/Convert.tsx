@@ -49,6 +49,7 @@ export default function ConvertPage({ toast }: PageProps) {
               className="input grow"
               value={file}
               placeholder="choose a video file"
+              aria-label="Video file"
               onChange={(e) => setFile(e.target.value)}
             />
             <Btn onClick={() => void pick()}>
@@ -80,6 +81,7 @@ export default function ConvertPage({ toast }: PageProps) {
             <input
               className="input grow"
               value={output}
+              aria-label="Save as"
               placeholder={
                 file
                   ? `${file.replace(/\.[^.]+$/, "")}.${preset}.mp4`

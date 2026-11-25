@@ -538,7 +538,7 @@ select.input {
   color: var(--text-dim);
   font: 12.5px var(--mono);
   cursor: pointer;
-  transition: all var(--fast) var(--ease);
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease), background var(--fast) var(--ease);
 }
 .tag:hover {
   color: var(--text);
@@ -703,7 +703,7 @@ select.input {
   background: var(--ink-1);
   color: var(--text);
   cursor: pointer;
-  transition: all var(--fast) var(--ease);
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease), background var(--fast) var(--ease);
 }
 .preset span {
   color: var(--text-faint);

@@ -51,7 +51,7 @@ export default function SettingsPage({ snap, reload, toast }: PageProps) {
         <div className="field">
           <label>Recordings folder</label>
           <div className="row">
-            <input className="input grow" value={config.output_dir} readOnly placeholder={snap.output_dir} />
+            <input className="input grow" value={config.output_dir} readOnly placeholder={snap.output_dir} aria-label="Recordings folder" />
             <Btn
               onClick={async () => {
                 const dir = await pickers.pickDirectory("Choose the recordings folder");
@@ -153,12 +153,14 @@ export default function SettingsPage({ snap, reload, toast }: PageProps) {
           <input
             className="input"
             placeholder="pkey"
+            aria-label="pkey"
             value={pkey}
             onChange={(e) => setPkey(e.target.value.trim())}
           />
           <input
             className="input"
             placeholder="pdkey"
+            aria-label="pdkey"
             value={pdkey}
             onChange={(e) => setPdkey(e.target.value.trim())}
           />
@@ -207,6 +209,7 @@ export default function SettingsPage({ snap, reload, toast }: PageProps) {
             <input
               className="input"
               value={config.ffmpeg_path}
+              aria-label="ffmpeg path"
               placeholder="found on PATH"
               onChange={(e) => void save({ ffmpeg_path: e.target.value })}
             />
@@ -216,6 +219,7 @@ export default function SettingsPage({ snap, reload, toast }: PageProps) {
             <input
               className="input"
               value={config.ffprobe_path}
+              aria-label="ffprobe path"
               placeholder="found on PATH"
               onChange={(e) => void save({ ffprobe_path: e.target.value })}
             />

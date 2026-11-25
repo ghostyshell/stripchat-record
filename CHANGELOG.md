@@ -7,6 +7,7 @@ All notable changes to **stripchat-record** are listed here. The format is based
 
 ### Changed
 
+- Accessibility pass: every Settings and Convert input has an accessible name, `.tag` and `.preset` transitions name their properties, docs hover styles also apply on keyboard focus.
 - Downloads are hosted on Cloudflare R2 under versioned, immutable keys, so a
   link stays valid until the next version. The weekly GoFile/file.kiwi re-upload
   is gone: the scheduled job now only checks the live feed for a version bump,
